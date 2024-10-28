@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     error::Error,
     fmt::{self, Debug, Display, Formatter},
-    fs,
+    fs::{self, OpenOptions},
     path::PathBuf,
     process::ExitCode,
 };
@@ -10,12 +10,15 @@ use std::{
 use clap::{arg, command, Parser};
 use zips::zip;
 
+use rawler::{decoders::*, get_decoder, RawFile};
+
 #[derive(Debug)]
 pub struct ParserErrorContext<'a> {
-    original_spec: &'a str,
-    start: u16,
-    width: u16,
+    pub original_spec: &'a str,
+    pub start: u16,
+    pub width: u16,
 }
+
 macro_rules! code {
     ($code:expr) => {
         ExitCode::from($code)
@@ -24,10 +27,7 @@ macro_rules! code {
 
 #[derive(Debug)]
 pub enum FormatParseError<'a> {
-    InvalidEscape {
-        ctx: ParserErrorContext<'a>,
-        sequence: &'a str,
-    },
+    InvalidEscape(ParserErrorContext<'a>),
 }
 
 impl<'a> Error for FormatParseError<'a> {}
@@ -58,14 +58,11 @@ mod test {
 
     #[test]
     fn print_error() {
-        let err = InvalidEscape {
-            ctx: ParserErrorContext {
-                original_spec: "%M%D_TestString",
-                start: 4,
-                width: 2,
-            },
-            sequence: "%M",
-        };
+        let err = InvalidEscape(ParserErrorContext {
+            original_spec: "%M%D_TestString",
+            start: 4,
+            width: 2,
+        });
 
         println!("{err}");
     }
@@ -74,10 +71,11 @@ mod test {
 impl<'a> Display for FormatParseError<'a> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let (ctx, err_msg) = match self {
-            Self::InvalidEscape { ctx, sequence } => (
-                ctx,
-                format!("Unrecognized escape sequence: \"{}\"", sequence),
-            ),
+            Self::InvalidEscape(ctx) => {
+                let (start, width) = (ctx.start as usize, ctx.width as usize);
+                let err_seq = &ctx.original_spec[start..start + width];
+                (ctx, format!("fatal: unrecognized escape sequence: \"{}\"", err_seq))
+            },
         };
 
         self.print_error_details(f, err_msg.as_str(), ctx)
@@ -151,15 +149,22 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if rawler::decoders::supported_extensions()
-                .contains(&path.extension()?.to_string_lossy().as_ref())
-            {
+            let ext = path.extension()?.to_string_lossy();
+            if rawler::decoders::supported_extensions().contains(&ext.as_ref()) {
                 Some(path)
             } else {
                 None
             }
         })
         .collect::<Vec<_>>();
+
+    for (path, i) in to_convert.iter().zip(1..) {
+        let mut image_file = OpenOptions::new().read(true).write(false).open(path)?;
+        let mut raw_file = RawFile::new(path, image_file);
+        let decoder = get_decoder(&mut raw_file)?;
+        const DECODE_PARAMS = RawDecodeParams { image_index: 0 };
+        let md = decoder.raw_metadata(&mut raw_file, DECODE_PARAMS);
+    }
 
     Ok(code!(0))
 }
