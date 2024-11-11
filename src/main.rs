@@ -1,7 +1,6 @@
 use std::{
     borrow::Cow,
     error::Error,
-    fmt::{self, Display},
     fs::{self, OpenOptions},
     path::PathBuf,
     process::ExitCode,
@@ -9,6 +8,7 @@ use std::{
 
 use chrono::NaiveDateTime;
 use clap::{arg, command, Parser};
+use error::{ParseError, ParseErrorType};
 use phf::{phf_map, phf_set, Map, Set};
 use rawler::{decoders::*, get_decoder, RawFile};
 use zips::zip;
@@ -24,106 +24,117 @@ struct ImportArgs {
     filename_format: Option<String>,
 }
 
-#[derive(Clone, Debug)]
-pub struct ParseError<'a> {
-    pub err_ty: ParseErrorType,
-    pub original_spec: Cow<'a, str>,
-    pub start: u16,
-    pub width: u16,
-}
+mod error {
+    use std::{
+        error::Error,
+        fmt::{self, Display},
+        borrow::Cow
+    };
 
-impl<'a> ParseError<'a> {
-    pub fn new<S: TryInto<u16>, W: TryInto<u16>>(
-        start: S,
-        width: W,
-        original: &'a str,
-        kind: ParseErrorType,
-    ) -> Self {
-        Self {
-            original_spec: Cow::Borrowed(original),
-            start: start.try_into().ok().unwrap(),
-            width: width.try_into().ok().unwrap(),
-            err_ty: kind,
+    #[derive(Clone, Debug)]
+    pub struct ParseError<'a> {
+        pub err_ty: ParseErrorType,
+        pub original: Cow<'a, str>,
+        pub start: u16,
+        pub width: u16,
+    }
+
+    impl<'a> ParseError<'a> {
+        pub fn new<S: TryInto<u16>, W: TryInto<u16>>(
+            start: S,
+            width: W,
+            original: &'a str,
+            kind: ParseErrorType,
+        ) -> Self {
+            Self {
+                original: Cow::Borrowed(original),
+                start: start.try_into().ok().unwrap(),
+                width: width.try_into().ok().unwrap(),
+                err_ty: kind,
+            }
+        }
+
+        pub fn unterminated_expansion<S: TryInto<u16>, W: TryInto<u16>>(
+            start: S,
+            width: W,
+            original: &'a str,
+        ) -> Self {
+            Self::new(
+                start,
+                width,
+                original,
+                ParseErrorType::UnterminatedExpansion,
+            )
+        }
+
+        pub fn invalid_expansion<S: TryInto<u16>, W: TryInto<u16>>(
+            start: S,
+            width: W,
+            original: &'a str,
+        ) -> Self {
+            Self::new(start, width, original, ParseErrorType::InvalidExpansion)
         }
     }
 
-    pub fn unterminated_expansion<S: TryInto<u16>, W: TryInto<u16>>(
-        start: S,
-        width: W,
-        original: &'a str,
-    ) -> Self {
-        Self::new(
-            start,
-            width,
-            original,
-            ParseErrorType::UnterminatedExpansion,
-        )
+    #[derive(Clone, Copy, Debug)]
+    pub enum ParseErrorType {
+        UnterminatedExpansion,
+        InvalidExpansion,
+        Unknown,
     }
 
-    pub fn invalid_expansion<S: TryInto<u16>, W: TryInto<u16>>(
-        start: S,
-        width: W,
-        original: &'a str,
-    ) -> Self {
-        Self::new(start, width, original, ParseErrorType::InvalidExpansion)
-    }
-}
+    impl<'a> ParseError<'a> {
+        fn print_error_details<'b: 'a>(
+            &self,
+            f: &mut fmt::Formatter<'_>,
+            msg: &'a str,
+        ) -> fmt::Result {
+            let (start, width) = (self.start as usize, self.width as usize);
 
-#[derive(Clone, Copy, Debug)]
-pub enum ParseErrorType {
-    InvalidEscape,
-    UnterminatedExpansion,
-    InvalidExpansion,
-    Unknown,
-}
+            let padding = format!("{:>1$}", "", start);
+            let underline = format!("{:~<1$}", "^", width);
 
-impl<'a> ParseError<'a> {
-    fn print_error_details<'b: 'a>(&self, f: &mut fmt::Formatter<'_>, msg: &'a str) -> fmt::Result {
-        let (start, width) = (self.start as usize, self.width as usize);
+            write!(f, "{msg}\n")?;
+            write!(f, "> {}\n", self.original)?;
+            write!(f, "> {}{}\n", padding, underline)
+        }
 
-        let padding = format!("{:>1$}", "", start);
-        let underline = format!("{:~<1$}", "^", width);
-
-        write!(f, "{msg}\n")?;
-        write!(f, "> {}\n", self.original_spec)?;
-        write!(f, "> {}{}\n", padding, underline)
-    }
-
-    pub fn deep_clone(&self) -> ParseError<'static> {
-        ParseError {
-            original_spec: Cow::Owned(self.original_spec.to_string()),
-            ..*self
+        pub fn deep_clone(&self) -> ParseError<'static> {
+            ParseError {
+                original: Cow::Owned(self.original.to_string()),
+                ..*self
+            }
         }
     }
-}
 
-impl<'a> Display for ParseError<'a> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        use ParseErrorType::*;
+    impl<'a> Display for ParseError<'a> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            use ParseErrorType::*;
 
-        let (start, width, orig) = (
-            self.start as usize,
-            self.width as usize,
-            &self.original_spec,
-        );
-        let err_seq = &orig[start..start + width];
+            let (start, width, orig) = (
+                self.start as usize,
+                self.width as usize,
+                &self.original,
+            );
 
-        let err_msg = format!(
-            "{}: {}",
-            match self.err_ty {
-                InvalidEscape => "unrecognized escape sequence",
-                UnterminatedExpansion => "unterminated variable expansion",
-                InvalidExpansion => "invalid variable expansion",
-                Unknown => "unknown error",
-            },
-            err_seq
-        );
+            let err_seq = &orig[start..start + width];
 
-        self.print_error_details(f, err_msg.as_str())
+            let err_msg = format!(
+                "{}: {}",
+                match self.err_ty {
+                    UnterminatedExpansion => "unterminated variable expansion",
+                    InvalidExpansion => "invalid variable expansion",
+                    Unknown => "unknown error",
+                },
+                err_seq
+            );
+
+            self.print_error_details(f, err_msg.as_str())
+        }
     }
-}
 
-impl<'a> Error for ParseError<'a> {}
+    impl<'a> Error for ParseError<'a> {}
+}
 
 #[repr(u8)]
 #[derive(Clone, Copy, Debug)]
@@ -147,7 +158,7 @@ pub enum MetadataKind {
 }
 
 #[derive(Debug)]
-pub enum FmtSpec<'a> {
+pub enum FmtItem<'a> {
     Literal(Cow<'a, str>),
     DateTime(Cow<'a, str>),
     Metadata(MetadataKind),
@@ -164,10 +175,6 @@ const TIME_FMT_SPECS: Set<u8> = phf_set! {
     b'S',
     b'H',
 };
-
-#[allow(unused)]
-#[derive(Debug)]
-struct FormatSpecification<'a>(Box<[FmtSpec<'a>]>);
 
 // I have to do this bc nvim is dumb dumb and can't tell that a quoted open squirly brace isn't a
 // new code block...
@@ -199,13 +206,13 @@ const MD_KIND_MAP: Map<&str, MetadataKind> = const {
 };
 
 #[inline]
-fn expand(s: &str) -> Option<FmtSpec> {
-    Some(FmtSpec::Metadata(MD_KIND_MAP.get(s)?.to_owned()))
+fn expand(s: &str) -> Option<FmtItem> {
+    Some(FmtItem::Metadata(MD_KIND_MAP.get(s)?.to_owned()))
 }
 
 #[allow(unused_parens)]
-fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
-    let mut spec = vec![];
+fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
+    let mut items = vec![];
     let mut to_parse = fmt;
 
     #[derive(Debug)]
@@ -269,11 +276,11 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
 
             // catch escaped double left squirly braces, only render one
             if s == &format!("{}{}", &OPEN_EXPANSION, &OPEN_EXPANSION) {
-                spec.push(FmtSpec::Literal(Cow::Borrowed(&s[0..1])));
+                items.push(FmtItem::Literal(Cow::Borrowed(&s[0..1])));
             } else {
-                spec.push(match state {
-                    ScanState::Literal => FmtSpec::Literal(Cow::Borrowed(s)),
-                    ScanState::DateTime => FmtSpec::DateTime(Cow::Borrowed(s)),
+                items.push(match state {
+                    ScanState::Literal => FmtItem::Literal(Cow::Borrowed(s)),
+                    ScanState::DateTime => FmtItem::DateTime(Cow::Borrowed(s)),
 
                     ScanState::ExpansionBody => {
                         assert!(
@@ -300,7 +307,7 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
 
             consumed += s.len();
         } else {
-            dbg!(spec, &state);
+            dbg!(items, &state);
 
             return Err(ParseError::new(
                 consumed,
@@ -313,12 +320,12 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
         state = ScanState::Start;
     }
 
-    Ok(FormatSpecification(spec.into_boxed_slice()))
+    Ok(items.into_boxed_slice())
 }
 
 #[cfg(test)]
 mod test_parse {
-    use crate::{FmtSpec, OPEN_EXPANSION};
+    use crate::{FmtItem, OPEN_EXPANSION};
 
     use super::parse_name_format;
     #[test]
@@ -337,13 +344,18 @@ mod test_parse {
     fn escaped_double_squirly_brace_only_prints_one() {
         let escaped = format!("{}{}%Y", &OPEN_EXPANSION, &OPEN_EXPANSION);
         let parsed = parse_name_format(&escaped);
+
         assert!(parsed.is_ok());
-        let parsed = parsed.unwrap().0;
+
+        let parsed = parsed.unwrap();
+
         assert!(parsed.len() == 2);
+
         assert!(matches!(
-            parsed[0], FmtSpec::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
+            parsed[0], FmtItem::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
         ));
-        assert!(matches!(parsed[1], FmtSpec::DateTime(..)));
+
+        assert!(matches!(parsed[1], FmtItem::DateTime(..)));
     }
 }
 
@@ -356,7 +368,7 @@ macro_rules! lazy_wrap {
 #[allow(unused)]
 fn render_filename(
     md: &rawler::decoders::RawMetadata,
-    fmt_spec: FormatSpecification,
+    items: Box<[FmtItem]>,
 ) -> Option<String> {
     let mut fname_str = String::new();
 
@@ -365,19 +377,19 @@ fn render_filename(
         NaiveDateTime::parse_from_str(date_str, EXIF_DT_FMT).ok()
     });
 
-    for atom in fmt_spec.0 {
+    for atom in items {
         let rendered = match atom {
-            FmtSpec::Literal(lit) => lit,
+            FmtItem::Literal(lit) => lit,
 
-            FmtSpec::DateTime(spec) => {
+            FmtItem::DateTime(item) => {
                 if let Some(date) = date.as_ref() {
-                    Cow::Owned(date.format(spec.as_ref()).to_string())
+                    Cow::Owned(date.format(item.as_ref()).to_string())
                 } else {
                     Cow::Borrowed("")
                 }
             }
 
-            FmtSpec::Metadata(md_kind) => {
+            FmtItem::Metadata(md_kind) => {
                 use MetadataKind::*;
                 type CowStr<'a> = Cow<'a, str>;
 
@@ -399,14 +411,14 @@ fn render_filename(
                         })
                     }
 
-                    LensMake => CowStr::Borrowed(if let Some(make) = &md.exif.lens_make {
-                        make.as_str()
+                    LensMake => CowStr::Borrowed(if let Some(ref make) = &md.exif.lens_make {
+                        make
                     } else {
                         ""
                     }),
 
-                    LensModel => CowStr::Borrowed(if let Some(model) = &md.exif.lens_model {
-                        model.as_str()
+                    LensModel => CowStr::Borrowed(if let Some(ref model) = &md.exif.lens_model {
+                        model
                     } else {
                         ""
                     }),
@@ -453,14 +465,16 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
     }
 
     #[allow(unused)]
-    let fmt_spec = parse_name_format(&fname_fmt).or_else(|err| Err(err.deep_clone()))?;
+    let fmt_items = parse_name_format(&fname_fmt).or_else(|err| Err(err.deep_clone()))?;
 
     let to_convert = fs::read_dir(&src_path)?
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            let ext = path.extension()?.to_string_lossy();
-            if rawler::decoders::supported_extensions().contains(&ext.as_ref()) {
+            let ext = path
+                .extension()
+                .map_or(Cow::default(), |s| s.to_string_lossy());
+            if supported_extensions().contains(&ext.as_ref()) {
                 Some(path)
             } else {
                 None
@@ -469,10 +483,12 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
         .collect::<Vec<_>>();
 
     for (path, _) in to_convert.iter().zip(1..) {
-        let image_file = OpenOptions::new().read(true).write(false).open(path)?;
-        let mut raw_file = RawFile::new(path, image_file);
+        let mut raw_file =
+            RawFile::new(path, OpenOptions::new().read(true).write(false).open(path)?);
+
         let decoder = get_decoder(&mut raw_file)?;
         const DECODE_PARAMS: RawDecodeParams = RawDecodeParams { image_index: 0 };
+
         #[allow(unused)]
         let md = decoder.raw_metadata(&mut raw_file, DECODE_PARAMS)?;
 
