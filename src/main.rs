@@ -3,7 +3,6 @@ use std::{
     error::Error,
     fmt::{self, Display},
     fs::{self, OpenOptions},
-    io::{Cursor, Read as _},
     path::PathBuf,
     process::ExitCode,
 };
@@ -319,8 +318,6 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
 
 #[cfg(test)]
 mod test_parse {
-    use std::borrow::Cow;
-
     use crate::{FmtSpec, OPEN_EXPANSION};
 
     use super::parse_name_format;
