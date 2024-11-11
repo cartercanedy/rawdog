@@ -330,66 +330,64 @@ fn render_filename(
     });
 
     for atom in fmt_spec.0 {
-        fname_str.push_str(
-            (match atom {
-                FmtSpec::Literal(lit) => lit,
+        let rendered = match atom {
+            FmtSpec::Literal(lit) => lit,
 
-                FmtSpec::DateTime(spec) => {
-                    if let Some(date) = date.as_ref() {
-                        Cow::Owned(date.format(spec.as_ref()).to_string())
-                    } else {
-                        Cow::Borrowed("")
-                    }
+            FmtSpec::DateTime(spec) => {
+                if let Some(date) = date.as_ref() {
+                    Cow::Owned(date.format(spec.as_ref()).to_string())
+                } else {
+                    Cow::Borrowed("")
                 }
+            }
 
-                FmtSpec::Metadata(md_kind) => {
-                    use MetadataKind::*;
-                    type CowStr<'a> = Cow<'a, str>;
+            FmtSpec::Metadata(md_kind) => {
+                use MetadataKind::*;
+                type CowStr<'a> = Cow<'a, str>;
 
-                    match md_kind {
-                        CameraMake => CowStr::Borrowed(&md.make),
-                        CameraModel => CowStr::Borrowed(&md.model),
+                match md_kind {
+                    CameraMake => CowStr::Borrowed(&md.make),
+                    CameraModel => CowStr::Borrowed(&md.model),
 
-                        CameraISO => CowStr::Owned(if let Some(iso) = &md.exif.iso_speed {
-                            iso.to_string()
+                    CameraISO => CowStr::Owned(if let Some(iso) = &md.exif.iso_speed {
+                        iso.to_string()
+                    } else {
+                        String::new()
+                    }),
+
+                    CameraShutterSpeed => {
+                        CowStr::Owned(if let Some(speed) = &md.exif.shutter_speed_value {
+                            speed.to_string().replace("/", "_")
                         } else {
                             String::new()
-                        }),
-
-                        CameraShutterSpeed => {
-                            CowStr::Owned(if let Some(speed) = &md.exif.shutter_speed_value {
-                                speed.to_string().replace("/", "_")
-                            } else {
-                                String::new()
-                            })
-                        }
-
-                        LensMake => CowStr::Borrowed(if let Some(make) = &md.exif.lens_make {
-                            make.as_str()
-                        } else {
-                            ""
-                        }),
-
-                        LensModel => CowStr::Borrowed(if let Some(model) = &md.exif.lens_model {
-                            model.as_str()
-                        } else {
-                            ""
-                        }),
-
-                        LensFocalLength => {
-                            CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
-                                focal_len.to_string().replace("/", "_")
-                            } else {
-                                String::new()
-                            })
-                        }
-
-                        _ => CowStr::Borrowed(""),
+                        })
                     }
+
+                    LensMake => CowStr::Borrowed(if let Some(make) = &md.exif.lens_make {
+                        make.as_str()
+                    } else {
+                        ""
+                    }),
+
+                    LensModel => CowStr::Borrowed(if let Some(model) = &md.exif.lens_model {
+                        model.as_str()
+                    } else {
+                        ""
+                    }),
+
+                    LensFocalLength => {
+                        CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
+                            focal_len.to_string().replace("/", "_")
+                        } else {
+                            String::new()
+                        })
+                    }
+
+                    _ => CowStr::Borrowed(""),
                 }
-            })
-            .as_ref(),
-        );
+            }
+        };
+        fname_str.push_str((rendered).as_ref());
     }
 
     Some(fname_str)
