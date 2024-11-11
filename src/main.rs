@@ -3,6 +3,7 @@ use std::{
     error::Error,
     fmt::{self, Display},
     fs::{self, OpenOptions},
+    io::{Cursor, Read as _},
     path::PathBuf,
     process::ExitCode,
 };
@@ -108,12 +109,16 @@ impl<'a> Display for ParseError<'a> {
         );
         let err_seq = &orig[start..start + width];
 
-        let err_msg = match self.err_ty {
-            InvalidEscape => format!("unrecognized escape sequence: \"{}\"", err_seq),
-            UnterminatedExpansion => format!("unterminate variable expansion: \"{}\"", err_seq),
-            InvalidExpansion => format!("invalid variable expansion: \"{}\"", err_seq),
-            _ => "".to_string(),
-        };
+        let err_msg = format!(
+            "{}: {}",
+            match self.err_ty {
+                InvalidEscape => "unrecognized escape sequence",
+                UnterminatedExpansion => "unterminated variable expansion",
+                InvalidExpansion => "invalid variable expansion",
+                Unknown => "unknown error",
+            },
+            err_seq
+        );
 
         self.print_error_details(f, err_msg.as_str())
     }
@@ -209,11 +214,13 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
         Start,
         Literal,
         DateTime,
-        Expansion,
+        ExpansionStart,
+        ExpansionBody,
     }
 
     let mut consumed = 0;
     let mut state = ScanState::Start;
+
     while to_parse.len() > 0 {
         let mut end = false;
         let split_at = to_parse
@@ -227,14 +234,24 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
                     (Start, sym) => {
                         state = match sym {
                             '%' => DateTime,
-                            &OPEN_EXPANSION => Expansion,
+                            &OPEN_EXPANSION => ExpansionStart,
                             _ => Literal,
                         };
 
                         true
                     }
 
-                    (DateTime, _) | (Expansion, &CLOSE_EXPANSION) => {
+                    (ExpansionStart, sym) => {
+                        (state, end) = if sym == &OPEN_EXPANSION {
+                            (Literal, true)
+                        } else {
+                            (ExpansionBody, false)
+                        };
+
+                        true
+                    }
+
+                    (DateTime, _) | (ExpansionBody, &CLOSE_EXPANSION) => {
                         end = true;
                         true
                     }
@@ -251,31 +268,36 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
         if let Some((s, remainder)) = to_parse.split_at_checked(split_at) {
             to_parse = remainder;
 
-            spec.push(match state {
-                ScanState::Literal => FmtSpec::Literal(Cow::Borrowed(s)),
-                ScanState::DateTime => FmtSpec::DateTime(Cow::Borrowed(s)),
+            // catch escaped double left squirly braces, only render one
+            if s == &format!("{}{}", &OPEN_EXPANSION, &OPEN_EXPANSION) {
+                spec.push(FmtSpec::Literal(Cow::Borrowed(&s[0..1])));
+            } else {
+                spec.push(match state {
+                    ScanState::Literal => FmtSpec::Literal(Cow::Borrowed(s)),
+                    ScanState::DateTime => FmtSpec::DateTime(Cow::Borrowed(s)),
 
-                ScanState::Expansion => {
-                    assert!(
-                        s.starts_with(OPEN_EXPANSION),
-                        "An expansion was interpreted incorrectly: fmt: {}, seq: {}",
-                        fmt,
-                        s
-                    );
-
-                    if s.ends_with(CLOSE_EXPANSION) {
-                        expand(&s[1..s.len() - 1]).ok_or(ParseError::invalid_expansion(
-                            consumed,
-                            s.len(),
+                    ScanState::ExpansionBody => {
+                        assert!(
+                            s.starts_with(OPEN_EXPANSION),
+                            "An expansion was interpreted incorrectly: fmt: {}, seq: {}",
                             fmt,
-                        ))?
-                    } else {
-                        return Err(ParseError::unterminated_expansion(consumed, s.len(), fmt));
-                    }
-                }
+                            s
+                        );
 
-                _ => unreachable!(),
-            });
+                        if s.ends_with(CLOSE_EXPANSION) {
+                            expand(&s[1..s.len() - 1]).ok_or(ParseError::invalid_expansion(
+                                consumed,
+                                s.len(),
+                                fmt,
+                            ))?
+                        } else {
+                            return Err(ParseError::unterminated_expansion(consumed, s.len(), fmt));
+                        }
+                    }
+
+                    _ => unreachable!(),
+                });
+            }
 
             consumed += s.len();
         } else {
@@ -297,6 +319,10 @@ fn parse_name_format(fmt: &str) -> Result<FormatSpecification, ParseError> {
 
 #[cfg(test)]
 mod test_parse {
+    use std::borrow::Cow;
+
+    use crate::{FmtSpec, OPEN_EXPANSION};
+
     use super::parse_name_format;
     #[test]
     fn parses_expansions_and_strftime_ok() {
@@ -308,6 +334,19 @@ mod test_parse {
         // again with the bad bracket parsing
         const BAD_EXPANSION: &str = ["{camera.make", "}"][0];
         assert!(parse_name_format(BAD_EXPANSION).is_err())
+    }
+
+    #[test]
+    fn escaped_double_squirly_brace_only_prints_one() {
+        let escaped = format!("{}{}%Y", &OPEN_EXPANSION, &OPEN_EXPANSION);
+        let parsed = parse_name_format(&escaped);
+        assert!(parsed.is_ok());
+        let parsed = parsed.unwrap().0;
+        assert!(parsed.len() == 2);
+        assert!(matches!(
+            parsed[0], FmtSpec::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
+        ));
+        assert!(matches!(parsed[1], FmtSpec::DateTime(..)));
     }
 }
 
