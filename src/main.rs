@@ -2,13 +2,22 @@ mod error;
 mod parse;
 
 use std::{
-    borrow::Cow, error::Error, fs::{self, OpenOptions}, io::{Cursor, Read, Seek, SeekFrom, Write}, path::PathBuf, process::ExitCode
+    borrow::Cow,
+    fs::{self, OpenOptions},
+    io::{self, Cursor, Seek as _, SeekFrom},
+    path::PathBuf,
+    process::ExitCode,
 };
 
 use chrono::NaiveDateTime;
 use clap::{arg, command, Parser};
+use error::AppErrorKind;
 use parse::{parse_name_format, FmtItem, MetadataKind};
-use rawler::{decoders::*, dng::convert::{convert_raw_stream, ConvertParams}, get_decoder, RawFile};
+use rawler::{
+    decoders::*,
+    dng::convert::{convert_raw_stream, ConvertParams},
+    get_decoder, RawFile,
+};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -24,20 +33,23 @@ struct ImportArgs {
 macro_rules! lazy_wrap {
     ($closure:expr) => {
         std::cell::LazyCell::<_, Box<dyn FnOnce() -> _>>::new(Box::new($closure))
-    }
+    };
 }
 
+type Result<T> = std::result::Result<T, AppErrorKind>;
+
 impl MetadataKind {
-    pub fn expand_with_metadata<'a>(&self, md: &'a RawMetadata) -> Cow<'a, str> {
-        type CowStr<'a> = Cow<'a, str>;
+    pub fn expand_with_metadata<'a>(&self, md: &'a RawMetadata, orig_fname: &str) -> Cow<'a, str> {
         use MetadataKind::*;
+        type CowStr<'a> = Cow<'a, str>;
+
         match self {
             CameraMake => CowStr::Borrowed(&md.make),
             CameraModel => CowStr::Borrowed(&md.model),
 
             CameraISO => CowStr::Owned(if let Some(iso) = &md.exif.iso_speed {
                 iso.to_string()
-           } else {
+            } else {
                 String::new()
             }),
 
@@ -61,24 +73,20 @@ impl MetadataKind {
                 ""
             }),
 
-            LensFocalLength => {
-                CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
-                    focal_len.to_string().replace("/", "_")
-                } else {
-                    String::new()
-                })
-            }
+            LensFocalLength => CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
+                focal_len.to_string().replace("/", "_")
+            } else {
+                String::new()
+            }),
+
+            ImageOriginalFilename => CowStr::Owned(orig_fname.to_string()),
 
             _ => CowStr::Borrowed(""),
         }
     }
 }
 
-#[allow(unused)]
-fn render_filename(
-    md: &rawler::decoders::RawMetadata,
-    items: &[FmtItem],
-) -> String {
+fn render_filename(orig_fname: &str, md: &rawler::decoders::RawMetadata, items: &[FmtItem]) -> String {
     let mut fname_str = String::new();
 
     let date = lazy_wrap!(|| {
@@ -98,7 +106,7 @@ fn render_filename(
                 }
             }
 
-            FmtItem::Metadata(md_kind) => md_kind.expand_with_metadata(md),
+            FmtItem::Metadata(md_kind) => md_kind.expand_with_metadata(md, orig_fname),
         };
 
         fname_str.push_str((rendered).as_ref());
@@ -110,45 +118,84 @@ fn render_filename(
 const EXIF_DT_FMT: &str = "%Y:%m:%d %H:%M:%S";
 
 macro_rules! exit {
-    ($code:expr) => {
-        return Ok(ExitCode::from($code))
+    ($c:expr) => {
+        std::process::ExitCode::from($c)
     };
 }
 
-fn main() -> Result<ExitCode, Box<dyn Error>> {
+fn main() -> ExitCode {
+    match run() {
+        Err(err) => {
+            use AppErrorKind::*;
+            match err {
+                FmtStrParse(_) => exit!(1),
+                Io(_, _) => exit!(2),
+                DirNotFound(_, _) => exit!(3),
+                AlreadyExists(_, _) => exit!(4),
+                ImgOp(_, _) => exit!(5),
+                Other(_, _) => exit!(255),
+            }
+        }
+
+        Ok(_) => exit!(0),
+    }
+}
+
+macro_rules! map_err {
+    ($r:expr, $s:literal, $($err_t:tt)+) => {
+        $r.map_err(
+            |e| ($($err_t)+)($s.into(), e)
+        )
+    };
+}
+
+fn run() -> Result<()> {
     let ImportArgs {
         source_path: src_path,
         dest_path: dst_path,
-        filename_format: fmt
+        filename_format: fmt,
     } = ImportArgs::parse();
 
     if !src_path.exists() {
-        Err(format!("invalid source path: {src_path:?}"))
+        Err(AppErrorKind::DirNotFound(
+            "source path doesn't exist".into(),
+            (&src_path).into(),
+        ))
     } else if dst_path.exists() {
         if !dst_path.is_dir() {
-            Err(format!("destination path exists and isn't a directory: {dst_path:?}"))
+            Err(AppErrorKind::AlreadyExists(
+                "destination path exists and isn't a directory".into(),
+                (&dst_path).into(),
+            ))
         } else {
             Ok(())
         }
     } else {
-        fs::create_dir_all(&dst_path)
-            .or_else(|e| Err(format!("couldn't create path: {dst_path:?}\n{e}")))
+        map_err!(
+            fs::create_dir_all(&dst_path),
+            "couldn't create destination directory",
+            AppErrorKind::Io
+        )
     }?;
 
-    #[allow(unused)]
     let fmt_items = if let Some(ref fmt) = fmt {
-        Some(parse_name_format(fmt).or_else(|e| Err(e.deep_clone()))?)
+        Some(parse_name_format(fmt)?)
     } else {
         None
     };
 
-    let to_convert = fs::read_dir(&src_path)?
+    let dir_entries = map_err!(
+        fs::read_dir(&src_path),
+        "source directory unavailable",
+        AppErrorKind::Io
+    )?;
+
+    let to_convert = dir_entries
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            let ext = path
-                .extension()
-                .map_or(Cow::default(), |s| s.to_string_lossy());
+            let ext = path.extension()?.to_string_lossy();
+
             if supported_extensions().contains(&ext.as_ref()) {
                 Some(path)
             } else {
@@ -160,13 +207,25 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
     for (path, _) in to_convert.iter().zip(1..) {
         let path_str = path.to_string_lossy();
 
-        let mut raw_file =
-            RawFile::new(path, OpenOptions::new().read(true).write(false).open(path)?);
+        let f = map_err!(
+            OpenOptions::new().read(true).write(false).open(path),
+            "can't open file",
+            AppErrorKind::Io
+        )?;
 
-        let decoder = get_decoder(&mut raw_file)?;
-        const DECODE_PARAMS: RawDecodeParams = RawDecodeParams { image_index: 0 };
+        let mut raw_file = RawFile::new(path, f);
 
-        let md = decoder.raw_metadata(&mut raw_file, DECODE_PARAMS)?;
+        let decoder = map_err!(
+            get_decoder(&mut raw_file),
+            "no compatible RAW image decoder available",
+            AppErrorKind::ImgOp
+        )?;
+
+        let md = map_err!(
+            decoder.raw_metadata(&mut raw_file, Default::default()),
+            "couldn't extract image metadata",
+            AppErrorKind::ImgOp
+        )?;
 
         let mut raw_output_stream = Cursor::new(vec![]);
 
@@ -178,34 +237,54 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
             ..Default::default()
         };
 
-        raw_file.file.seek(SeekFrom::Start(0));
+        raw_file
+            .file
+            .seek(SeekFrom::Start(0))
+            .expect("IO seeking error");
 
-        convert_raw_stream(raw_file.file, &mut raw_output_stream, &path_str, &cvt_params)
-            .or_else(|e| Err(format!("there was an error converting file to dng: {}", e)))?;
+        map_err!(
+            convert_raw_stream(
+                raw_file.file,
+                &mut raw_output_stream,
+                &path_str,
+                &cvt_params,
+            ),
+            "couldn't convert image to DNG",
+            AppErrorKind::ImgOp
+        )?;
 
-        raw_output_stream.seek(SeekFrom::Start(0));
+        raw_output_stream
+            .seek(SeekFrom::Start(0))
+            .expect("IO seeking error");
 
-        let out_path = dst_path.join(match fmt_items {
-            Some(ref items) => render_filename(&md, items),
-            None => {
-                path.file_stem()
-                    .ok_or(format!(
-                        "couldn't strip the file extension: {}",
-                        &path_str
-                    ))?
+
+
+        let out_path = dst_path.join(
+            match fmt_items {
+                Some(ref items) => render_filename(path.file_stem().unwrap().to_string_lossy().as_ref(), &md, items),
+                None => path
+                    .file_stem()
+                    .expect(&format!("couldn't strip the file extension: {}", &path_str))
                     .to_string_lossy()
-                    .to_string()
-            }
-        } + ".dng");
+                    .to_string(),
+            } + ".dng",
+        );
 
-        let mut buf = vec![];
-        raw_output_stream.read_to_end(&mut buf);
-        let mut out_file = OpenOptions::new().create_new(true).write(true).open(&out_path)
-            .or_else(|e| Err(format!("there was an error while trying to access {}: {}", out_path.to_string_lossy(), e)))?;
+        let mut out_file = map_err!(
+            OpenOptions::new()
+                .create_new(true)
+                .write(true)
+                .open(&out_path),
+            "couldn't create output file",
+            AppErrorKind::Io
+        )?;
 
-        out_file.write_all(&buf[..])
-            .or_else(|e| Err(format!("there was an error while trying to write to {}: {}", out_path.to_string_lossy(), e)))?;
+        map_err!(
+            io::copy(&mut raw_output_stream, &mut out_file),
+            "couldn't write converted DNG to disk",
+            AppErrorKind::Io
+        )?;
     }
 
-    exit!(0)
+    Ok(())
 }

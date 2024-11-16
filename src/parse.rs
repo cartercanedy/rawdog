@@ -1,19 +1,20 @@
 use std::borrow::Cow;
 
-use phf::{phf_map, phf_set, Map, Set};
+use phf::{phf_map, Map};
 
-use crate::error::{ParseError, ParseErrorType};
-
+use crate::{
+    error::{AppErrorKind, ParseError, ParseErrorType},
+    Result,
+};
 
 #[repr(u8)]
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MetadataKind {
     CameraMake,
     CameraModel,
     CameraShutterSpeed,
     CameraExposureComp,
     CameraISO,
-    #[allow(unused)]
     CameraFlash,
     LensFStop,
     LensMake,
@@ -25,26 +26,15 @@ pub enum MetadataKind {
     ImageHeight,
     ImageWidth,
     ImageBitDepth,
+    ImageOriginalFilename
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum FmtItem<'a> {
     Literal(Cow<'a, str>),
     DateTime(Cow<'a, str>),
     Metadata(MetadataKind),
 }
-
-#[allow(unused)]
-const TIME_FMT_SPECS: Set<u8> = phf_set! {
-    b'Y',
-    b'y',
-    b'm',
-    b'M',
-    b'd',
-    b'D',
-    b'S',
-    b'H',
-};
 
 // I have to do this bc nvim is dumb dumb and can't tell that a quoted open squirly brace isn't a
 // new code block...
@@ -62,6 +52,7 @@ const MD_KIND_MAP: Map<&str, MetadataKind> = const {
         "camera.shutter_speed" => CameraShutterSpeed,
         "camera.iso" => CameraISO,
         "camera.exposure_compensation" => CameraExposureComp,
+        "camea.flash" => CameraFlash,
         "lens.make" => LensMake,
         "lens.model" => LensModel,
         "lens.focal_length" => LensFocalLength,
@@ -72,6 +63,7 @@ const MD_KIND_MAP: Map<&str, MetadataKind> = const {
         "image.bit_depth" => ImageBitDepth,
         "image.color_space" => ImageColorSpace,
         "image.sequence_number" => ImageSequenceNumber,
+        "image.original_filename" => ImageOriginalFilename
     }
 };
 
@@ -81,7 +73,7 @@ fn expand(s: &str) -> Option<FmtItem> {
 }
 
 #[allow(unused_parens)]
-pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
+pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
     let mut items = vec![];
     let mut to_parse = fmt;
 
@@ -121,8 +113,8 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
                         (state, end) = if sym == &OPEN_EXPANSION {
                             (Literal, true)
                         } else {
-                                (ExpansionBody, false)
-                            };
+                            (ExpansionBody, false)
+                        };
 
                         true
                     }
@@ -139,13 +131,14 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
             })
             .last()
             .unwrap()
-        .1;
+            .1;
 
         if let Some((s, remainder)) = to_parse.split_at_checked(split_at) {
             to_parse = remainder;
 
+            const DOUBLE_OPEN_BRACE: &str = ["{{", "}}"][0];
             // catch escaped double left squirly braces, only render one
-            if s == &format!("{}{}", &OPEN_EXPANSION, &OPEN_EXPANSION) {
+            if s == DOUBLE_OPEN_BRACE {
                 items.push(FmtItem::Literal(Cow::Borrowed(&s[0..1])));
             } else {
                 items.push(match state {
@@ -161,13 +154,13 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
                         );
 
                         if s.ends_with(CLOSE_EXPANSION) {
-                            expand(&s[1..s.len() - 1]).ok_or(ParseError::invalid_expansion(
-                                consumed,
-                                s.len(),
-                                fmt,
+                            expand(&s[1..s.len() - 1]).ok_or(AppErrorKind::FmtStrParse(
+                                ParseError::invalid_expansion(consumed, s.len(), fmt),
                             ))?
                         } else {
-                            return Err(ParseError::unterminated_expansion(consumed, s.len(), fmt));
+                            return Err(AppErrorKind::FmtStrParse(
+                                ParseError::unterminated_expansion(consumed, s.len(), fmt),
+                            ));
                         }
                     }
 
@@ -179,15 +172,24 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>, ParseError> {
         } else {
             dbg!(items, &state);
 
-            return Err(ParseError::new(
-                consumed,
-                fmt.len() - consumed,
-                fmt,
-                ParseErrorType::Unknown,
+            return Err(AppErrorKind::FmtStrParse(
+                ParseError::new(
+                    consumed,
+                    fmt.len() - consumed,
+                    fmt,
+                    ParseErrorType::Unknown,
+                )
             ));
         }
 
         state = ScanState::Start;
+    }
+
+    const IMG_SEQ_MD_ITEM: FmtItem<'static> =
+        FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
+
+    if !items.contains(&IMG_SEQ_MD_ITEM) {
+        items.push(IMG_SEQ_MD_ITEM)
     }
 
     Ok(items.into_boxed_slice())
@@ -222,10 +224,9 @@ mod test_parse {
         assert!(parsed.len() == 2);
 
         assert!(matches!(
-        parsed[0], FmtItem::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
-    ));
+            parsed[0], FmtItem::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
+        ));
 
         assert!(matches!(parsed[1], FmtItem::DateTime(..)));
     }
 }
-

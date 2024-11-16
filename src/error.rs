@@ -1,26 +1,29 @@
 use std::{
     error::Error,
     fmt::{self, Display},
-    borrow::Cow
+    io,
+    path::PathBuf,
 };
 
+use rawler::RawlerError;
+
 #[derive(Clone, Debug)]
-pub struct ParseError<'a> {
+pub struct ParseError {
     pub err_ty: ParseErrorType,
-    pub original: Cow<'a, str>,
+    pub original: String,
     pub start: u16,
     pub width: u16,
 }
 
-impl<'a> ParseError<'a> {
+impl ParseError {
     pub fn new<S: TryInto<u16>, W: TryInto<u16>>(
         start: S,
         width: W,
-        original: &'a str,
+        original: &str,
         kind: ParseErrorType,
     ) -> Self {
         Self {
-            original: Cow::Borrowed(original),
+            original: original.to_string(),
             start: start.try_into().ok().unwrap(),
             width: width.try_into().ok().unwrap(),
             err_ty: kind,
@@ -30,7 +33,7 @@ impl<'a> ParseError<'a> {
     pub fn unterminated_expansion<S: TryInto<u16>, W: TryInto<u16>>(
         start: S,
         width: W,
-        original: &'a str,
+        original: &str,
     ) -> Self {
         Self::new(
             start,
@@ -43,7 +46,7 @@ impl<'a> ParseError<'a> {
     pub fn invalid_expansion<S: TryInto<u16>, W: TryInto<u16>>(
         start: S,
         width: W,
-        original: &'a str,
+        original: &str,
     ) -> Self {
         Self::new(start, width, original, ParseErrorType::InvalidExpansion)
     }
@@ -56,12 +59,8 @@ pub enum ParseErrorType {
     Unknown,
 }
 
-impl<'a> ParseError<'a> {
-    fn print_error_details<'b: 'a>(
-        &self,
-        f: &mut fmt::Formatter<'_>,
-        msg: &'a str,
-    ) -> fmt::Result {
+impl ParseError {
+    fn print_error_details(&self, f: &mut fmt::Formatter<'_>, msg: &str) -> fmt::Result {
         let (start, width) = (self.start as usize, self.width as usize);
 
         let padding = format!("{:>1$}", "", start);
@@ -71,24 +70,13 @@ impl<'a> ParseError<'a> {
         write!(f, "> {}\n", self.original)?;
         write!(f, "> {}{}\n", padding, underline)
     }
-
-    pub fn deep_clone(&self) -> ParseError<'static> {
-        ParseError {
-            original: Cow::Owned(self.original.to_string()),
-            ..*self
-        }
-    }
 }
 
-impl<'a> Display for ParseError<'a> {
+impl Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use ParseErrorType::*;
 
-        let (start, width, orig) = (
-            self.start as usize,
-            self.width as usize,
-            &self.original,
-        );
+        let (start, width, orig) = (self.start as usize, self.width as usize, &self.original);
 
         let err_seq = &orig[start..start + width];
 
@@ -106,5 +94,20 @@ impl<'a> Display for ParseError<'a> {
     }
 }
 
-impl<'a> Error for ParseError<'a> {}
+impl Error for ParseError {}
 
+#[derive(Debug)]
+pub enum AppErrorKind {
+    FmtStrParse(ParseError),
+    Io(String, io::Error),
+    AlreadyExists(String, PathBuf),
+    DirNotFound(String, PathBuf),
+    ImgOp(String, RawlerError),
+    Other(String, Box<dyn Error>),
+}
+
+impl<T> From<AppErrorKind> for crate::Result<T> {
+    fn from(value: AppErrorKind) -> Self {
+        Err(value)
+    }
+}
