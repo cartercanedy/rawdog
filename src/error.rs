@@ -96,18 +96,26 @@ impl Display for ParseError {
 
 impl Error for ParseError {}
 
-#[derive(Debug)]
-pub enum AppErrorKind {
-    FmtStrParse(ParseError),
+pub enum ConvertError {
+    ImgOp(String, RawlerError),
     Io(String, io::Error),
     AlreadyExists(String, PathBuf),
-    DirNotFound(String, PathBuf),
-    ImgOp(String, RawlerError),
-    Other(String, Box<dyn Error>),
+    Other(String, Box<dyn Error + Send + Sync>),
 }
 
-impl<T> From<AppErrorKind> for crate::Result<T> {
-    fn from(value: AppErrorKind) -> Self {
+#[derive(Debug)]
+pub enum AppError {
+    FmtStrParse(ParseError),
+    Io(String, io::Error),
+    DirNotFound(String, PathBuf),
+    AlreadyExists(String, PathBuf),
+    Other(String, Box<dyn Error + Send + Sync>),
+}
+
+impl<T> From<AppError> for crate::Result<T> {
+    fn from(value: AppError) -> Self {
         Err(value)
     }
 }
+
+

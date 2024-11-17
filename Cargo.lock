@@ -950,6 +950,7 @@ dependencies = [
  "clap",
  "phf",
  "rawler",
+ "rayon",
  "zips",
 ]
 
