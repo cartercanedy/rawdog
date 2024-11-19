@@ -143,7 +143,18 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
             } else {
                 items.push(match state {
                     ScanState::Literal => FmtItem::Literal(Cow::Borrowed(s)),
-                    ScanState::DateTime => FmtItem::DateTime(Cow::Borrowed(s)),
+
+                    ScanState::DateTime => {
+                        if s.len() != 2 {
+                            return Err(AppError::FmtStrParse(ParseError::invalid_expansion(
+                                consumed,
+                                s.len(),
+                                fmt,
+                            )));
+                        }
+
+                        FmtItem::DateTime(Cow::Borrowed(s))
+                    }
 
                     ScanState::ExpansionBody => {
                         assert!(
