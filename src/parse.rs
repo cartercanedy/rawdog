@@ -89,7 +89,7 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
     let mut consumed = 0;
     let mut state = ScanState::Start;
 
-    while to_parse.len() > 0 {
+    while !to_parse.is_empty() {
         let mut end = false;
         let split_at = to_parse
             .chars()

@@ -98,7 +98,7 @@ fn render_filename(
     let mut fname_str = String::new();
 
     let date = lazy_wrap!(|| {
-        let date_str = &md.exif.date_time_original.clone().unwrap_or(String::new());
+        let date_str = &md.exif.date_time_original.clone().unwrap_or_default();
         NaiveDateTime::parse_from_str(date_str, EXIF_DT_FMT).ok()
     });
 
@@ -275,7 +275,7 @@ fn run() -> Result<()> {
 
             let orig_fname = path
                 .file_stem()
-                .expect(&format!("couldn't deduce the filename from {}", &path_str))
+                .unwrap_or_else(|| panic!("couldn't deduce the filename from {}", &path_str))
                 .to_string_lossy();
 
             let out_path = dst_path.join(
@@ -293,7 +293,10 @@ fn run() -> Result<()> {
             }
 
             let mut out_file = map_err!(
-                OpenOptions::new().write(true).create(true).open(&out_path),
+                OpenOptions::new()
+                    .write(true)
+                    .truncate(true)
+                    .open(&out_path),
                 "couldn't create output file",
                 ConvertError::Io
             )?;
