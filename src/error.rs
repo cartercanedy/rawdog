@@ -113,4 +113,3 @@ pub enum AppError {
     #[allow(unused)]
     Other(String, Box<dyn Error + Send>),
 }
-
