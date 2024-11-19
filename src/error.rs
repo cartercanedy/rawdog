@@ -99,8 +99,9 @@ impl Error for ParseError {}
 pub enum ConvertError {
     ImgOp(String, RawlerError),
     Io(String, io::Error),
-    AlreadyExists(String, PathBuf),
-    Other(String, Box<dyn Error + Send + Sync>),
+    AlreadyExists(String),
+    #[allow(unused)]
+    Other(String, Box<dyn Error + Send>),
 }
 
 #[derive(Debug)]
@@ -109,13 +110,7 @@ pub enum AppError {
     Io(String, io::Error),
     DirNotFound(String, PathBuf),
     AlreadyExists(String, PathBuf),
-    Other(String, Box<dyn Error + Send + Sync>),
+    #[allow(unused)]
+    Other(String, Box<dyn Error + Send>),
 }
-
-impl<T> From<AppError> for crate::Result<T> {
-    fn from(value: AppError) -> Self {
-        Err(value)
-    }
-}
-
 
