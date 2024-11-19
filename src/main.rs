@@ -1,20 +1,28 @@
 mod error;
 mod parse;
 
+use parse::{parse_name_format, FmtItem, MetadataKind};
+
 use std::{
-    borrow::Cow, fmt::Display, fs::{self, OpenOptions}, io::{self, Cursor, Seek as _, SeekFrom}, path::PathBuf, process::ExitCode
+    borrow::Cow,
+    fmt::Display,
+    fs::{self, OpenOptions},
+    io::{self, Cursor, Seek as _, SeekFrom},
+    path::{Path, PathBuf},
+    process::ExitCode,
 };
 
-use chrono::NaiveDateTime;
-use clap::{arg, command, Parser};
-use error::{AppError, ConvertError};
-use parse::{parse_name_format, FmtItem, MetadataKind};
 use rawler::{
     decoders::*,
     dng::convert::{convert_raw_stream, ConvertParams},
     get_decoder, RawFile,
 };
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator};
+
+use chrono::NaiveDateTime;
+use clap::{arg, command, Parser};
+use error::{AppError, ConvertError};
+use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator};
+use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 
 #[derive(Parser)]
 #[command(version, about, long_about = None)]
@@ -26,7 +34,7 @@ struct ImportArgs {
     #[arg(short = 'F', long, value_name = "FORMAT_STRING")]
     filename_format: Option<String>,
     #[arg(short, long, default_value_t = false)]
-    force: bool
+    force: bool,
 }
 
 macro_rules! lazy_wrap {
@@ -85,7 +93,7 @@ impl MetadataKind {
     }
 }
 
-fn render_filename(orig_fname: &str, md: &rawler::decoders::RawMetadata, items: &[FmtItem]) -> String {
+fn render_filename(orig_fname: &str, md: &RawMetadata, items: &[FmtItem]) -> String {
     let mut fname_str = String::new();
 
     let date = lazy_wrap!(|| {
@@ -123,20 +131,26 @@ macro_rules! exit {
 }
 
 fn main() -> ExitCode {
+    ignore("rawler");
+    Log::init(LevelFilter::Trace);
+
     match run() {
         Err(err) => {
             use AppError::*;
 
             #[allow(unused)]
-            let (s, e, code): (Option<String>, &dyn Display, u8) = match err {
-                FmtStrParse(ref e) => (None, e, 1),
-                Io(s, ref e) => (Some(s), e, 2),
-                DirNotFound(s, ref e) => (Some(s), &e.to_string_lossy(), 3),
-                AlreadyExists(s, ref e) => (Some(s), &e.to_string_lossy(), 4),
-                Other(s, ref e) => (Some(s), e, 5)
+            let (s, e, code): (String, Option<&dyn Display>, u8) = match err {
+                FmtStrParse(e) => (e.to_string(), None, 1),
+                Io(s, ref e) => (s, Some(e), 2),
+
+                DirNotFound(s, ref e) => (format!("{s}: {}", e.display()), None, 3),
+
+                AlreadyExists(s, ref e) => (format!("{s}: {}", e.display()), None, 4),
+
+                Other(s, ref e) => (s, Some(e), 5),
             };
 
-            println!("{e}");
+            error!("{s}");
             exit!(code)
         }
 
@@ -157,7 +171,7 @@ fn run() -> Result<()> {
         source_path: src_path,
         dest_path: dst_path,
         filename_format: fmt,
-        force
+        force,
     } = ImportArgs::parse();
 
     if !src_path.exists() {
@@ -208,96 +222,122 @@ fn run() -> Result<()> {
         })
         .collect::<Vec<_>>();
 
-    type ConvertResult = std::result::Result<(), ConvertError>;
-    to_convert.into_par_iter().map(|path| -> ConvertResult {
-        let path_str = path.to_string_lossy();
+    type ConvertResult<'a> = std::result::Result<(), (&'a Path, ConvertError)>;
+    to_convert
+        .par_iter()
+        .map(|path| -> ConvertResult {
+            let path_str = path.to_string_lossy();
 
-        let f = map_err!(
-            OpenOptions::new().read(true).write(false).open(&path),
-            "can't open file",
-            ConvertError::Io
-        )?;
+            let f = map_err!(
+                OpenOptions::new().read(true).write(false).open(&path),
+                "can't open file",
+                ConvertError::Io
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        let mut raw_file = RawFile::new(&path, f);
+            let mut raw_file = RawFile::new(&path, f);
 
-        let decoder = map_err!(
-            get_decoder(&mut raw_file),
-            "no compatible RAW image decoder available",
-            ConvertError::ImgOp
-        )?;
+            let decoder = map_err!(
+                get_decoder(&mut raw_file),
+                "no compatible RAW image decoder available",
+                ConvertError::ImgOp
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        let md = map_err!(
-            decoder.raw_metadata(&mut raw_file, Default::default()),
-            "couldn't extract image metadata",
-            ConvertError::ImgOp
-        )?;
+            let md = map_err!(
+                decoder.raw_metadata(&mut raw_file, Default::default()),
+                "couldn't extract image metadata",
+                ConvertError::ImgOp
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        let mut raw_output_stream = Cursor::new(vec![]);
+            let orig_fname = path
+                .file_stem()
+                .expect(&format!("couldn't deduce the filename from {}", &path_str))
+                .to_string_lossy();
 
-        let cvt_params = ConvertParams {
-            preview: true,
-            embedded: false,
-            software: "rawdog".to_string(),
-            artist: md.exif.artist.clone(),
-            ..Default::default()
-        };
+            let out_path = dst_path.join(
+                match fmt_items {
+                    Some(ref items) => render_filename(orig_fname.as_ref(), &md, items),
+                    None => orig_fname.into(),
+                } + ".dng",
+            );
 
-        raw_file
-            .file
-            .seek(SeekFrom::Start(0))
-            .expect("IO seeking error");
+            if !force && out_path.exists() {
+                return Err((
+                    path.as_path(),
+                    ConvertError::AlreadyExists("won't overwrite existing file".into()),
+                ));
+            }
 
-        map_err!(
-            convert_raw_stream(
-                raw_file.file,
-                &mut raw_output_stream,
-                &path_str,
-                &cvt_params,
-            ),
-            "couldn't convert image to DNG",
-            ConvertError::ImgOp
-        )?;
+            let mut raw_output_stream = Cursor::new(vec![]);
 
-        raw_output_stream
-            .seek(SeekFrom::Start(0))
-            .expect("IO seeking error");
+            let cvt_params = ConvertParams {
+                preview: true,
+                embedded: false,
+                software: "rawdog".to_string(),
+                artist: md.exif.artist.clone(),
+                ..Default::default()
+            };
 
-        let orig_fname = path
-            .file_stem()
-            .expect(&format!("couldn't deduce the filename from {}", &path_str))
-            .to_string_lossy();
+            raw_file
+                .file
+                .seek(SeekFrom::Start(0))
+                .expect("IO seeking error");
 
-        let out_path = dst_path.join(
-            match fmt_items {
-                Some(ref items) => render_filename(orig_fname.as_ref(), &md, items),
-                None => orig_fname.into()
-            } + ".dng",
-        );
+            map_err!(
+                convert_raw_stream(
+                    raw_file.file,
+                    &mut raw_output_stream,
+                    &path_str,
+                    &cvt_params,
+                ),
+                "couldn't convert image to DNG",
+                ConvertError::ImgOp
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        if !force && out_path.exists() {
-            return Err(ConvertError::AlreadyExists(
-                "won't overwrite existing file".into(),
-                out_path
-            ))
-        }
+            raw_output_stream
+                .seek(SeekFrom::Start(0))
+                .expect("IO seeking error");
 
-        let mut out_file = map_err!(
-            OpenOptions::new()
-                .write(true)
-                .create(true)
-                .open(&out_path),
-            "couldn't create output file",
-            ConvertError::Io
-        )?;
+            let mut out_file = map_err!(
+                OpenOptions::new().write(true).create(true).open(&out_path),
+                "couldn't create output file",
+                ConvertError::Io
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        map_err!(
-            io::copy(&mut raw_output_stream, &mut out_file),
-            "couldn't write converted DNG to disk",
-            ConvertError::Io
-        )?;
+            map_err!(
+                io::copy(&mut raw_output_stream, &mut out_file),
+                "couldn't write converted DNG to disk",
+                ConvertError::Io
+            )
+            .map_err(|e| (path.as_path(), e))?;
 
-        Ok(())
-    }).collect::<Vec<ConvertResult>>();
+            Ok(())
+        })
+        .for_each(|result| {
+            let err_info: std::result::Result<(), (&Path, &str, Option<&dyn Display>)> =
+                match &result {
+                    Err((p, e)) => match e {
+                        ConvertError::AlreadyExists(s) => Err((p, s, None)),
+
+                        ConvertError::Io(s, e) => Err((p, s, Some(e))),
+                        ConvertError::ImgOp(s, e) => Err((p, s, Some(e))),
+                        ConvertError::Other(s, e) => Err((p, s, Some(e))),
+                    },
+
+                    _ => Ok(()),
+                };
+
+            if let Err((p, s, e)) = err_info {
+                warn!("while processing \"{}\": {s}", p.display());
+                if let Some(dbg) = e {
+                    debug!("{dbg}");
+                }
+            };
+        });
 
     Ok(())
 }
