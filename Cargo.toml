@@ -1,9 +1,9 @@
 [package]
-name = "rawdog"
+name = "rawbit"
 authors = ["Carter J. Canedy <cartercanedy42@gmail.com>"]
 description = "A camera RAW image preprocessor and importer"
 license = "MIT"
-repository = "https://github.com/cartercanedy/rawdog"
+repository = "https://github.com/cartercanedy/rawbit"
 version = "0.1.0"
 edition = "2021"
 

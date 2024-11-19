@@ -295,7 +295,7 @@ fn run() -> Result<()> {
             let cvt_params = ConvertParams {
                 preview: true,
                 embedded: false,
-                software: "rawdog".to_string(),
+                software: "rawbit".to_string(),
                 artist: md.exif.artist.clone(),
                 ..Default::default()
             };
