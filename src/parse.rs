@@ -26,7 +26,7 @@ pub enum MetadataKind {
     ImageHeight,
     ImageWidth,
     ImageBitDepth,
-    ImageOriginalFilename
+    ImageOriginalFilename,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -172,21 +172,18 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
         } else {
             dbg!(items, &state);
 
-            return Err(AppErrorKind::FmtStrParse(
-                ParseError::new(
-                    consumed,
-                    fmt.len() - consumed,
-                    fmt,
-                    ParseErrorType::Unknown,
-                )
-            ));
+            return Err(AppErrorKind::FmtStrParse(ParseError::new(
+                consumed,
+                fmt.len() - consumed,
+                fmt,
+                ParseErrorType::Unknown,
+            )));
         }
 
         state = ScanState::Start;
     }
 
-    const IMG_SEQ_MD_ITEM: FmtItem<'static> =
-        FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
+    const IMG_SEQ_MD_ITEM: FmtItem<'static> = FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
 
     if !items.contains(&IMG_SEQ_MD_ITEM) {
         items.push(IMG_SEQ_MD_ITEM)

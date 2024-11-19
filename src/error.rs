@@ -117,5 +117,3 @@ impl<T> From<AppError> for crate::Result<T> {
         Err(value)
     }
 }
-
-
