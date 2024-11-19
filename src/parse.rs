@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use phf::{phf_map, Map};
 
 use crate::{
-    error::{AppErrorKind, ParseError, ParseErrorType},
+    error::{AppError, ParseError, ParseErrorType},
     Result,
 };
 
@@ -26,7 +26,7 @@ pub enum MetadataKind {
     ImageHeight,
     ImageWidth,
     ImageBitDepth,
-    ImageOriginalFilename
+    ImageOriginalFilename,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -154,13 +154,15 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
                         );
 
                         if s.ends_with(CLOSE_EXPANSION) {
-                            expand(&s[1..s.len() - 1]).ok_or(AppErrorKind::FmtStrParse(
+                            expand(&s[1..s.len() - 1]).ok_or(AppError::FmtStrParse(
                                 ParseError::invalid_expansion(consumed, s.len(), fmt),
                             ))?
                         } else {
-                            return Err(AppErrorKind::FmtStrParse(
-                                ParseError::unterminated_expansion(consumed, s.len(), fmt),
-                            ));
+                            return Err(AppError::FmtStrParse(ParseError::unterminated_expansion(
+                                consumed,
+                                s.len(),
+                                fmt,
+                            )));
                         }
                     }
 
@@ -172,21 +174,18 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
         } else {
             dbg!(items, &state);
 
-            return Err(AppErrorKind::FmtStrParse(
-                ParseError::new(
-                    consumed,
-                    fmt.len() - consumed,
-                    fmt,
-                    ParseErrorType::Unknown,
-                )
-            ));
+            return Err(AppError::FmtStrParse(ParseError::new(
+                consumed,
+                fmt.len() - consumed,
+                fmt,
+                ParseErrorType::Unknown,
+            )));
         }
 
         state = ScanState::Start;
     }
 
-    const IMG_SEQ_MD_ITEM: FmtItem<'static> =
-        FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
+    const IMG_SEQ_MD_ITEM: FmtItem<'static> = FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
 
     if !items.contains(&IMG_SEQ_MD_ITEM) {
         items.push(IMG_SEQ_MD_ITEM)
