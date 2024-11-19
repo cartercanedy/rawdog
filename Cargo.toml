@@ -1,5 +1,9 @@
 [package]
 name = "rawdog"
+author = "Carter J. Canedy <cartercanedy42@gmail.com>"
+description = "A camera RAW image preprocessor and importer"
+license = "MIT"
+repository = "https://github.com/cartercanedy/rawdog"
 version = "0.1.0"
 edition = "2021"
 
@@ -9,4 +13,5 @@ clap = { version = "4.5.20", features = ["derive", "env", "string", "unicode"] }
 phf = { version = "0.11.2", features = ["macros"] }
 rawler = "0.6.0"
 rayon = "1.10.0"
+smlog = "0.1.1"
 zips = "0.1.7"
