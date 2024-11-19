@@ -66,9 +66,9 @@ impl ParseError {
         let padding = format!("{:>1$}", "", start);
         let underline = format!("{:~<1$}", "^", width);
 
-        write!(f, "{msg}\n")?;
-        write!(f, "> {}\n", self.original)?;
-        write!(f, "> {}{}\n", padding, underline)
+        writeln!(f, "{msg}")?;
+        writeln!(f, "> {}", self.original)?;
+        writeln!(f, "> {}{}", padding, underline)
     }
 }
 

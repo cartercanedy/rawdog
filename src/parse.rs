@@ -89,7 +89,7 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
     let mut consumed = 0;
     let mut state = ScanState::Start;
 
-    while to_parse.len() > 0 {
+    while !to_parse.is_empty() {
         let mut end = false;
         let split_at = to_parse
             .chars()
@@ -223,7 +223,7 @@ mod test_parse {
         assert!(parsed.len() == 2);
 
         assert!(matches!(
-            parsed[0], FmtItem::Literal(ref s) if s.chars().nth(0).unwrap() == OPEN_EXPANSION && s.len() == 1
+            parsed[0], FmtItem::Literal(ref s) if s.chars().next().unwrap() == OPEN_EXPANSION && s.len() == 1
         ));
 
         assert!(matches!(parsed[1], FmtItem::DateTime(..)));

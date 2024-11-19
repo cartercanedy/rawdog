@@ -97,7 +97,7 @@ fn render_filename(orig_fname: &str, md: &RawMetadata, items: &[FmtItem]) -> Str
     let mut fname_str = String::new();
 
     let date = lazy_wrap!(|| {
-        let date_str = &md.exif.date_time_original.clone().unwrap_or(String::new());
+        let date_str = &md.exif.date_time_original.clone().unwrap_or_default();
         NaiveDateTime::parse_from_str(date_str, EXIF_DT_FMT).ok()
     });
 
@@ -159,7 +159,7 @@ fn main() -> ExitCode {
 }
 
 macro_rules! map_err {
-    ($r:expr, $s:literal, $($err_t:tt)+) => {
+    ($r:expr, $s:expr, $($err_t:tt)+) => {
         $r.map_err(
             |e| ($($err_t)+)($s.into(), e)
         )
@@ -222,38 +222,38 @@ fn run() -> Result<()> {
         })
         .collect::<Vec<_>>();
 
-    type ConvertResult<'a> = std::result::Result<(), (&'a Path, ConvertError)>;
+    type ConvertResult = std::result::Result<(), (PathBuf, ConvertError)>;
     to_convert
         .par_iter()
         .map(|path| -> ConvertResult {
             let path_str = path.to_string_lossy();
 
             let f = map_err!(
-                OpenOptions::new().read(true).write(false).open(&path),
+                OpenOptions::new().read(true).write(false).open(path),
                 "can't open file",
                 ConvertError::Io
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
-            let mut raw_file = RawFile::new(&path, f);
+            let mut raw_file = RawFile::new(path, f);
 
             let decoder = map_err!(
                 get_decoder(&mut raw_file),
                 "no compatible RAW image decoder available",
                 ConvertError::ImgOp
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
             let md = map_err!(
                 decoder.raw_metadata(&mut raw_file, Default::default()),
                 "couldn't extract image metadata",
                 ConvertError::ImgOp
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
             let orig_fname = path
                 .file_stem()
-                .expect(&format!("couldn't deduce the filename from {}", &path_str))
+                .unwrap_or_else(|| panic!("couldn't deduce the filename from {}", &path_str))
                 .to_string_lossy();
 
             let out_path = dst_path.join(
@@ -263,11 +263,31 @@ fn run() -> Result<()> {
                 } + ".dng",
             );
 
-            if !force && out_path.exists() {
-                return Err((
-                    path.as_path(),
-                    ConvertError::AlreadyExists("won't overwrite existing file".into()),
-                ));
+            if out_path.exists() {
+                if !force {
+                    return Err((
+                        path.clone(),
+                        ConvertError::AlreadyExists(format!(
+                            "won't overwrite existing file: {}",
+                            out_path.display()
+                        )),
+                    ));
+                } else if out_path.is_dir() {
+                    return Err((
+                        path.clone(),
+                        ConvertError::AlreadyExists(format!(
+                            "computed filepath already exists as a directory: {}",
+                            out_path.display()
+                        )),
+                    ));
+                } else {
+                    map_err!(
+                        fs::remove_file(&out_path),
+                        format!("couldn't remove existing file: {}", out_path.display()),
+                        ConvertError::Io
+                    )
+                    .map_err(|e| (path.clone(), e))?
+                }
             }
 
             let mut raw_output_stream = Cursor::new(vec![]);
@@ -283,7 +303,7 @@ fn run() -> Result<()> {
             raw_file
                 .file
                 .seek(SeekFrom::Start(0))
-                .expect("IO seeking error");
+                .unwrap_or_else(|_| panic!("file IO seeking error: {}", path.display()));
 
             map_err!(
                 convert_raw_stream(
@@ -295,25 +315,32 @@ fn run() -> Result<()> {
                 "couldn't convert image to DNG",
                 ConvertError::ImgOp
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
             raw_output_stream
                 .seek(SeekFrom::Start(0))
-                .expect("IO seeking error");
+                // i don't know if this will ever fail unless ENOMEM
+                .expect("in-memory IO seeking error");
 
             let mut out_file = map_err!(
-                OpenOptions::new().write(true).create(true).open(&out_path),
-                "couldn't create output file",
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&out_path),
+                format!("couldn't create output file: {}", out_path.display()),
                 ConvertError::Io
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
             map_err!(
                 io::copy(&mut raw_output_stream, &mut out_file),
-                "couldn't write converted DNG to disk",
+                format!(
+                    "couldn't write converted DNG to disk: {}",
+                    out_path.display()
+                ),
                 ConvertError::Io
             )
-            .map_err(|e| (path.as_path(), e))?;
+            .map_err(|e| (path.clone(), e))?;
 
             Ok(())
         })
