@@ -1,6 +1,6 @@
 [package]
 name = "rawdog"
-author = "Carter J. Canedy <cartercanedy42@gmail.com>"
+authors = ["Carter J. Canedy <cartercanedy42@gmail.com>"]
 description = "A camera RAW image preprocessor and importer"
 license = "MIT"
 repository = "https://github.com/cartercanedy/rawdog"
