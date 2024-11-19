@@ -3,7 +3,7 @@ use std::borrow::Cow;
 use phf::{phf_map, Map};
 
 use crate::{
-    error::{AppErrorKind, ParseError, ParseErrorType},
+    error::{AppError, ParseError, ParseErrorType},
     Result,
 };
 
@@ -154,13 +154,15 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
                         );
 
                         if s.ends_with(CLOSE_EXPANSION) {
-                            expand(&s[1..s.len() - 1]).ok_or(AppErrorKind::FmtStrParse(
+                            expand(&s[1..s.len() - 1]).ok_or(AppError::FmtStrParse(
                                 ParseError::invalid_expansion(consumed, s.len(), fmt),
                             ))?
                         } else {
-                            return Err(AppErrorKind::FmtStrParse(
-                                ParseError::unterminated_expansion(consumed, s.len(), fmt),
-                            ));
+                            return Err(AppError::FmtStrParse(ParseError::unterminated_expansion(
+                                consumed,
+                                s.len(),
+                                fmt,
+                            )));
                         }
                     }
 
@@ -172,7 +174,7 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
         } else {
             dbg!(items, &state);
 
-            return Err(AppErrorKind::FmtStrParse(ParseError::new(
+            return Err(AppError::FmtStrParse(ParseError::new(
                 consumed,
                 fmt.len() - consumed,
                 fmt,
