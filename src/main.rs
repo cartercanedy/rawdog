@@ -216,7 +216,7 @@ fn run() -> Result<()> {
         .num_threads(n_threads)
         .thread_name(|n| format!("rawbit-worker-{n}"))
         .build_global()
-        .expect("failed to initialized worker threads");
+        .expect("failed to initialize worker threads");
 
     let ingest = match source {
         ImageSource {
