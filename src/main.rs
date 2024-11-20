@@ -1,7 +1,7 @@
 mod error;
 mod parse;
 
-use parse::{parse_name_format, FmtItem, MetadataKind};
+use parse::{parse_name_format, FmtItem};
 
 use std::{
     borrow::Cow,
@@ -127,54 +127,6 @@ macro_rules! lazy_wrap {
 }
 
 type Result<T> = std::result::Result<T, AppError>;
-
-impl MetadataKind {
-    pub fn expand_with_metadata<'a>(&self, md: &'a RawMetadata, orig_fname: &str) -> Cow<'a, str> {
-        use MetadataKind::*;
-        type CowStr<'a> = Cow<'a, str>;
-
-        match self {
-            CameraMake => CowStr::Borrowed(&md.make),
-            CameraModel => CowStr::Borrowed(&md.model),
-
-            CameraISO => CowStr::Owned(if let Some(iso) = &md.exif.iso_speed {
-                iso.to_string()
-            } else {
-                String::new()
-            }),
-
-            CameraShutterSpeed => {
-                CowStr::Owned(if let Some(speed) = &md.exif.shutter_speed_value {
-                    speed.to_string().replace("/", "_")
-                } else {
-                    String::new()
-                })
-            }
-
-            LensMake => CowStr::Borrowed(if let Some(ref make) = &md.exif.lens_make {
-                make
-            } else {
-                ""
-            }),
-
-            LensModel => CowStr::Borrowed(if let Some(ref model) = &md.exif.lens_model {
-                model
-            } else {
-                ""
-            }),
-
-            LensFocalLength => CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
-                focal_len.to_string().replace("/", "_")
-            } else {
-                String::new()
-            }),
-
-            ImageOriginalFilename => CowStr::Owned(orig_fname.to_string()),
-
-            _ => CowStr::Borrowed(""),
-        }
-    }
-}
 
 fn render_filename(orig_fname: &str, md: &RawMetadata, items: &[FmtItem]) -> String {
     let mut fname_str = String::new();

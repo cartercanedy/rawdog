@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 
 use phf::{phf_map, Map};
+use rawler::decoders::RawMetadata;
 
 use crate::{
     error::{AppError, ParseError, ParseErrorType},
@@ -27,6 +28,54 @@ pub enum MetadataKind {
     ImageWidth,
     ImageBitDepth,
     ImageOriginalFilename,
+}
+
+impl MetadataKind {
+    pub fn expand_with_metadata<'a>(&self, md: &'a RawMetadata, orig_fname: &str) -> Cow<'a, str> {
+        use MetadataKind::*;
+        type CowStr<'a> = Cow<'a, str>;
+
+        match self {
+            CameraMake => CowStr::Borrowed(&md.make),
+            CameraModel => CowStr::Borrowed(&md.model),
+
+            CameraISO => CowStr::Owned(if let Some(iso) = &md.exif.iso_speed {
+                iso.to_string()
+            } else {
+                String::new()
+            }),
+
+            CameraShutterSpeed => {
+                CowStr::Owned(if let Some(speed) = &md.exif.shutter_speed_value {
+                    speed.to_string().replace("/", "_")
+                } else {
+                    String::new()
+                })
+            }
+
+            LensMake => CowStr::Borrowed(if let Some(ref make) = &md.exif.lens_make {
+                make
+            } else {
+                ""
+            }),
+
+            LensModel => CowStr::Borrowed(if let Some(ref model) = &md.exif.lens_model {
+                model
+            } else {
+                ""
+            }),
+
+            LensFocalLength => CowStr::Owned(if let Some(focal_len) = &md.exif.focal_length {
+                focal_len.to_string().replace("/", "_")
+            } else {
+                String::new()
+            }),
+
+            ImageOriginalFilename => CowStr::Owned(orig_fname.to_string()),
+
+            _ => CowStr::Borrowed(""),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
