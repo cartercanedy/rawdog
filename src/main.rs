@@ -100,7 +100,7 @@ struct ImportArgs {
     #[arg(
         long = "embed-original",
         default_value_t = false,
-        help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer and necessarily increase the size of the output"
+        help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
     )]
     embed: bool,
 }
