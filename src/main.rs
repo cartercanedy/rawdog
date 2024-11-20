@@ -19,22 +19,105 @@ use rawler::{
 };
 
 use chrono::NaiveDateTime;
-use clap::{arg, command, Parser};
+use clap::{
+    arg,
+    builder::{
+        styling::{AnsiColor, Style},
+        Styles,
+    },
+    command, Args, Parser,
+};
 use error::{AppError, ConvertError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator};
 use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 
+fn n_threads() -> usize {
+    std::thread::available_parallelism().unwrap().get()
+}
+
+fn style() -> Styles {
+    Styles::styled()
+        .header(Style::new().fg_color(Some(AnsiColor::Yellow.into())))
+        .error(Style::new().fg_color(Some(AnsiColor::Red.into())))
+        .literal(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
+        .invalid(Style::new().fg_color(Some(AnsiColor::Red.into())))
+        .usage(Style::new().fg_color(Some(AnsiColor::White.into())))
+        .placeholder(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
+}
+
 #[derive(Parser)]
-#[command(version, about, long_about = None)]
+#[command(
+    version,
+    about = "A camera RAW image preprocessor and importer",
+    long_about = None,
+    trailing_var_arg = true,
+    styles = style()
+)]
 struct ImportArgs {
-    #[arg(short, long, value_name = "DIR")]
-    source_path: PathBuf,
-    #[arg(short, long, value_name = "DIR")]
-    dest_path: PathBuf,
-    #[arg(short = 'F', long, value_name = "FORMAT_STRING")]
-    filename_format: Option<String>,
-    #[arg(short, long, default_value_t = false)]
+    #[command(flatten)]
+    source: ImageSource,
+
+    #[arg(
+        short = 'o',
+        long = "out-dir",
+        value_name = "DIR",
+        help = "directory to write converted DNGs"
+    )]
+    dst_path: PathBuf,
+
+    #[arg(
+        short = 'F',
+        long = "filename-format",
+        value_name = "FORMAT-STRING",
+        help = "filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax"
+    )]
+    fmt_str: Option<String>,
+
+    #[arg(short = 'j',
+        long,
+        value_name = "NUM-THREADS",
+        default_value_t = n_threads(),
+        help = "number of threads to use while processing input images, defaults to number of CPUs"
+    )]
+    n_threads: usize,
+
+    #[arg(
+        short,
+        long,
+        value_name = "ARTIST",
+        help = "value of the \"artist\" field in converted DNGs"
+    )]
+    artist: Option<String>,
+
+    #[arg(
+        short,
+        long,
+        default_value_t = false,
+        help = "overwrite existing files, if they exist"
+    )]
     force: bool,
+
+    #[arg(
+        long = "embed-original",
+        default_value_t = false,
+        help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer and necessarily increase the size of the output"
+    )]
+    embed: bool,
+}
+
+#[derive(Args)]
+#[group(required = true, multiple = false)]
+struct ImageSource {
+    #[arg(
+        short = 'i',
+        long = "in-dir",
+        value_name = "DIR",
+        help = "directory containing raw files to convert"
+    )]
+    src_path: Option<PathBuf>,
+
+    #[arg(help = "individual files to convert")]
+    files: Option<Vec<PathBuf>>,
 }
 
 macro_rules! lazy_wrap {
@@ -168,18 +251,54 @@ macro_rules! map_err {
 
 fn run() -> Result<()> {
     let ImportArgs {
-        source_path: src_path,
-        dest_path: dst_path,
-        filename_format: fmt,
+        source,
+        dst_path,
+        fmt_str: fmt,
+        n_threads,
+        artist,
         force,
+        embed,
     } = ImportArgs::parse();
 
-    if !src_path.exists() {
-        Err(AppError::DirNotFound(
-            "source path doesn't exist".into(),
-            (&src_path).into(),
-        ))
-    } else if dst_path.exists() {
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(n_threads)
+        .thread_name(|n| format!("rawbit-worker-{n}"))
+        .build_global()
+        .expect("failed to initialized worker threads");
+
+    let ingest = match source {
+        ImageSource {
+            src_path: Some(ref path),
+            files: None,
+        } => {
+            if !path.exists() {
+                return Err(AppError::DirNotFound(
+                    "source path doesn't exist".into(),
+                    path.into(),
+                ));
+            }
+
+            map_err!(
+                fs::read_dir(path),
+                format!("failed to stat source directory: {}", path.display()),
+                AppError::Io
+            )?
+            .filter_map(|p| match p {
+                Ok(p) => Some(p.path()),
+                Err(_) => None,
+            })
+            .collect::<Vec<_>>()
+        }
+
+        ImageSource {
+            src_path: None,
+            files: Some(paths),
+        } => paths,
+
+        _ => unreachable!(),
+    };
+
+    if dst_path.exists() {
         if !dst_path.is_dir() {
             Err(AppError::AlreadyExists(
                 "destination path exists and isn't a directory".into(),
@@ -202,28 +321,8 @@ fn run() -> Result<()> {
         None
     };
 
-    let dir_entries = map_err!(
-        fs::read_dir(&src_path),
-        "source directory unavailable",
-        AppError::Io
-    )?;
-
-    let to_convert = dir_entries
-        .filter_map(|entry| {
-            let entry = entry.ok()?;
-            let path = entry.path();
-            let ext = path.extension()?.to_string_lossy();
-
-            if supported_extensions().contains(&ext.as_ref()) {
-                Some(path)
-            } else {
-                None
-            }
-        })
-        .collect::<Vec<_>>();
-
     type ConvertResult = std::result::Result<(), (PathBuf, ConvertError)>;
-    to_convert
+    ingest
         .par_iter()
         .map(|path| -> ConvertResult {
             let path_str = path.to_string_lossy();
@@ -294,9 +393,9 @@ fn run() -> Result<()> {
 
             let cvt_params = ConvertParams {
                 preview: true,
-                embedded: false,
+                embedded: embed,
                 software: "rawbit".to_string(),
-                artist: md.exif.artist.clone(),
+                artist: artist.clone().or_else(|| md.exif.artist.clone()),
                 ..Default::default()
             };
 
