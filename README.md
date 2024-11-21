@@ -20,7 +20,7 @@ while offering the ability to manipulate metadata and customize file name format
 - **Custom Filename Formatting**: Supports user-defined naming conventions for output files.
 - **Metadata Handling**: Supports EXIF metadata manipulation
 - **Multi-Threaded Processing**: Leverages multiple CPU cores for parallel image processing.
-| 
+
 *__all written in Rust, btw...__*
 
 ## Installation
