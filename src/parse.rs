@@ -1,3 +1,7 @@
+// Copyright (c) Carter J. Canedy <cartercanedy42@gmail.com>
+// Distribution subject to the terms of the MIT license
+// See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
+
 use std::borrow::Cow;
 
 use phf::{phf_map, Map};
