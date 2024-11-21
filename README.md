@@ -74,7 +74,7 @@ rawbit -i"./raw" -o"./dng" -F"%Y-%m-%d_{camera.model}_{lens.model}_{image.origin
   <span style="color:teal;">-a</span>, <span style="color:teal;">--artist</span><span style="color:teal;"> </span><span style="color:teal;">&lt;ARTIST&gt;</span>  value of the &quot;artist&quot; field in converted DNGs
       <span style="color:teal;">--embed-original</span>   embed the original raw image in the converted DNG
                          NOTE: conversion may take considerably longer
-  <span style="color:teal;">-j</span>, <span style="color:teal;">--n-threads</span><span style="color:teal;"> </span><span style="color:teal;">&lt;N&gt;</span>    number of threads to use while processing input images, defaults to number of CPUs [default: 8]
+  <span style="color:teal;">-j</span>, <span style="color:teal;">--n-threads</span><span style="color:teal;"> </span><span style="color:teal;">&lt;N&gt;</span>    number of threads to use while processing input images, defaults to number of CPUs
   <span style="color:teal;">-f</span>, <span style="color:teal;">--force</span>            overwrite existing files, if they exist
   <span style="color:teal;">-h</span>, <span style="color:teal;">--help</span>             Print help
   <span style="color:teal;">-V</span>, <span style="color:teal;">--version</span>          Print version
