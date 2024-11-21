@@ -1,7 +1,8 @@
-<div style="display: flex; flex-direction: column; align-items: center">
+<div align="center">
 <img width="300" height="250" src="./res/rawbit.png"/>
 <br>
-<h1>rawbit</h1>
+
+# rawbit
 
 A **camera RAW image preprocessor and importer** written in Rust.  
 
