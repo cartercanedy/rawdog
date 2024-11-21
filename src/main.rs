@@ -29,11 +29,11 @@ use clap::{
         styling::{AnsiColor, Style},
         Styles,
     },
-    command, Args, Parser,
+    command, ArgAction, Args, Parser,
 };
 use error::{AppError, ConvertError};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator};
-use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
+use smlog::{debug, error, ignore, info, log::LevelFilter, warn, Log};
 
 fn n_threads() -> usize {
     std::thread::available_parallelism().unwrap().get()
@@ -55,7 +55,8 @@ fn style() -> Styles {
     about = "A camera RAW image preprocessor and importer",
     long_about = None,
     trailing_var_arg = true,
-    styles = style()
+    styles = style(),
+    next_line_help = true,
 )]
 struct ImportArgs {
     #[command(flatten)]
@@ -92,13 +93,17 @@ struct ImportArgs {
     )]
     embed: bool,
 
-    #[arg(short = 'j',
+    #[arg(
+        short = 'j',
         long,
         value_name = "N",
         default_value_t = n_threads(),
         help = "number of threads to use while processing input images, defaults to number of CPUs"
     )]
     n_threads: usize,
+
+    #[command(flatten)]
+    log_config: LogConfig,
 
     #[arg(
         short,
@@ -107,6 +112,25 @@ struct ImportArgs {
         help = "overwrite existing files, if they exist"
     )]
     force: bool,
+}
+
+#[derive(Args)]
+#[group(multiple = false)]
+struct LogConfig {
+    #[arg(
+        short,
+        long,
+        help = "quiet output, only emit critical errors",
+        trailing_var_arg = false
+    )]
+    quiet: bool,
+
+    #[arg(
+        short,
+        action = ArgAction::Count,
+        help = "increase log verbosity; specify multiple times to increase verbosity"
+    )]
+    verbose_logs: u8,
 }
 
 #[derive(Args)]
@@ -120,7 +144,7 @@ struct ImageSource {
     )]
     src_path: Option<PathBuf>,
 
-    #[arg(help = "individual files to convert")]
+    #[arg(help = "individual files to convert", trailing_var_arg = true)]
     files: Option<Vec<PathBuf>>,
 }
 
@@ -170,10 +194,30 @@ macro_rules! exit {
 }
 
 fn main() -> ExitCode {
-    ignore("rawler");
-    Log::init(LevelFilter::Trace);
+    let args = ImportArgs::parse();
+    let LogConfig {
+        quiet,
+        verbose_logs,
+    } = args.log_config;
 
-    match run() {
+    let filter: LevelFilter = if quiet {
+        ignore("rawler");
+        LevelFilter::Error
+    } else {
+        if verbose_logs < 2 {
+            ignore("rawler");
+        }
+
+        match verbose_logs {
+            0 => LevelFilter::Info,
+            1 => LevelFilter::Debug,
+            2.. => LevelFilter::Trace,
+        }
+    };
+
+    Log::init(filter);
+
+    match run(args) {
         Err(err) => {
             use AppError::*;
 
@@ -205,7 +249,7 @@ macro_rules! map_err {
     };
 }
 
-fn run() -> Result<()> {
+fn run(args: ImportArgs) -> Result<()> {
     let ImportArgs {
         source,
         dst_path,
@@ -214,7 +258,8 @@ fn run() -> Result<()> {
         artist,
         force,
         embed,
-    } = ImportArgs::parse();
+        ..
+    } = args;
 
     rayon::ThreadPoolBuilder::new()
         .num_threads(n_threads)
@@ -241,7 +286,10 @@ fn run() -> Result<()> {
             )?
             .filter_map(|p| match p {
                 Ok(p) => Some(p.path()),
-                Err(_) => None,
+                Err(e) => {
+                    warn!("error while accessing an input file: {}", e);
+                    None
+                }
             })
             .collect::<Vec<_>>()
         }
@@ -349,6 +397,7 @@ fn run() -> Result<()> {
 
             let cvt_params = ConvertParams {
                 preview: true,
+                thumbnail: true,
                 embedded: embed,
                 software: "rawbit".to_string(),
                 artist: artist.clone().or_else(|| md.exif.artist.clone()),
@@ -387,6 +436,8 @@ fn run() -> Result<()> {
             )
             .map_err(|e| (path.clone(), e))?;
 
+            info!("Writing DNG: \"{}\"", path.display());
+
             map_err!(
                 io::copy(&mut raw_output_stream, &mut out_file),
                 format!(
@@ -416,7 +467,7 @@ fn run() -> Result<()> {
             if let Err((p, s, e)) = err_info {
                 warn!("while processing \"{}\": {s}", p.display());
                 if let Some(dbg) = e {
-                    debug!("{dbg}");
+                    debug!("Cause of last error:\n{dbg}");
                 }
             };
         });
