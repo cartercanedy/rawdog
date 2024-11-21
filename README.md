@@ -1,5 +1,5 @@
 <div align="center">
-<img width="300" height="250" src="./res/rawbit.png"/>
+<img width="300" height="300" src="./res/rawbit.png"/>
 <br>
 
 # rawbit
