@@ -67,19 +67,11 @@ struct ImportArgs {
 
     #[arg(
         short = 'F',
-        long = "filename-format",
-        value_name = "FORMAT-STRING",
+        long = "format",
+        value_name = "FORMAT",
         help = "filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax"
     )]
     fmt_str: Option<String>,
-
-    #[arg(short = 'j',
-        long,
-        value_name = "NUM-THREADS",
-        default_value_t = n_threads(),
-        help = "number of threads to use while processing input images, defaults to number of CPUs"
-    )]
-    n_threads: usize,
 
     #[arg(
         short,
@@ -90,19 +82,27 @@ struct ImportArgs {
     artist: Option<String>,
 
     #[arg(
+        long = "embed-original",
+        default_value_t = false,
+        help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
+    )]
+    embed: bool,
+
+    #[arg(short = 'j',
+        long,
+        value_name = "N",
+        default_value_t = n_threads(),
+        help = "number of threads to use while processing input images, defaults to number of CPUs"
+    )]
+    n_threads: usize,
+
+    #[arg(
         short,
         long,
         default_value_t = false,
         help = "overwrite existing files, if they exist"
     )]
     force: bool,
-
-    #[arg(
-        long = "embed-original",
-        default_value_t = false,
-        help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
-    )]
-    embed: bool,
 }
 
 #[derive(Args)]
