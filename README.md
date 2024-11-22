@@ -63,21 +63,36 @@ rawbit -i"./raw" -o"./dng" -F"%Y-%m-%d_{camera.model}_{lens.model}_{image.origin
 <div>
 <pre>
 <span style="color:teal;">rawbit</span> <span style="color:teal;">[OPTIONS]</span> <span style="color:teal;">--out-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span> <span style="color:teal;">&lt;--in-dir &lt;DIR&gt;|FILES&gt;</span>
+<br>
 
 <span style="color:olive;">Arguments:</span>
-  <span style="color:teal;">[FILES]...</span>  individual files to convert
+  <span style="color:teal;">\[FILES\]...</span>
+&nbsp;&nbsp;&nbsp;&nbsp;individual files to convert
 
 <span style="color:olive;">Options:</span>
-  <span style="color:teal;">-i</span>, <span style="color:teal;">--in-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>     directory containing raw files to convert
-  <span style="color:teal;">-o</span>, <span style="color:teal;">--out-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>    directory to write converted DNGs
-  <span style="color:teal;">-F</span>, <span style="color:teal;">--format</span><span style="color:teal;"> </span><span style="color:teal;">&lt;FORMAT&gt;</span>  filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax
-  <span style="color:teal;">-a</span>, <span style="color:teal;">--artist</span><span style="color:teal;"> </span><span style="color:teal;">&lt;ARTIST&gt;</span>  value of the &quot;artist&quot; field in converted DNGs
-      <span style="color:teal;">--embed-original</span>   embed the original raw image in the converted DNG
-                         NOTE: conversion may take considerably longer
-  <span style="color:teal;">-j</span>, <span style="color:teal;">--n-threads</span><span style="color:teal;"> </span><span style="color:teal;">&lt;N&gt;</span>    number of threads to use while processing input images, defaults to number of CPUs
-  <span style="color:teal;">-f</span>, <span style="color:teal;">--force</span>            overwrite existing files, if they exist
-  <span style="color:teal;">-h</span>, <span style="color:teal;">--help</span>             Print help
-  <span style="color:teal;">-V</span>, <span style="color:teal;">--version</span>          Print version
+  <span style="color:teal;">-i</span>, <span style="color:teal;">--in-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>
+&nbsp;&nbsp;&nbsp;&nbsp;directory containing raw files to convert
+  <span style="color:teal;">-o</span>, <span style="color:teal;">--out-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>
+&nbsp;&nbsp;&nbsp;&nbsp;directory to write converted DNGs
+  <span style="color:teal;">-F</span>, <span style="color:teal;">--format</span><span style="color:teal;"> </span><span style="color:teal;">&lt;FORMAT&gt;</span>
+&nbsp;&nbsp;&nbsp;&nbsp;filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax
+  <span style="color:teal;">-a</span>, <span style="color:teal;">--artist</span><span style="color:teal;"> </span><span style="color:teal;">&lt;ARTIST&gt;</span>
+&nbsp;&nbsp;&nbsp;&nbsp;value of the &quot;artist&quot; field in converted DNGs
+      <span style="color:teal;">--embed-original</span>
+&nbsp;&nbsp;&nbsp;&nbsp;embed the original raw image in the converted DNG
+&nbsp;&nbsp;&nbsp;&nbsp;NOTE: conversion may take considerably longer
+  <span style="color:teal;">-j</span>, <span style="color:teal;">--n-threads</span><span style="color:teal;"> </span><span style="color:teal;">&lt;N&gt;</span>
+&nbsp;&nbsp;&nbsp;&nbsp;number of threads to use while processing input images, defaults to number of CPUs
+  <span style="color:teal;">-q</span>, <span style="color:teal;">--quiet</span>
+&nbsp;&nbsp;&nbsp;&nbsp;quiet output, only emit critical errors
+  <span style="color:teal;">-v</span><span style="color:teal;">...</span>
+&nbsp;&nbsp;&nbsp;&nbsp;increase log verbosity; specify multiple times to increase verbosity
+  <span style="color:teal;">-f</span>, <span style="color:teal;">--force</span>
+&nbsp;&nbsp;&nbsp;&nbsp;overwrite existing files, if they exist
+  <span style="color:teal;">-h</span>, <span style="color:teal;">--help</span>
+&nbsp;&nbsp;&nbsp;&nbsp;Print help
+  <span style="color:teal;">-V</span>, <span style="color:teal;">--version</span>
+&nbsp;&nbsp;&nbsp;&nbsp;Print version
 </pre>
 </div>
 

@@ -57,6 +57,7 @@ fn style() -> Styles {
     trailing_var_arg = true,
     styles = style(),
     next_line_help = true,
+    color = clap::ColorChoice::Always
 )]
 struct ImportArgs {
     #[command(flatten)]
