@@ -5,6 +5,7 @@
 mod error;
 mod parse;
 
+use error::{AppError, ConvertError};
 use parse::{parse_name_format, FmtItem};
 
 use std::{
@@ -12,41 +13,42 @@ use std::{
     fmt::Display,
     fs::{self, OpenOptions},
     io::{self, Cursor, Seek as _, SeekFrom},
-    path::{Path, PathBuf},
+    path::PathBuf,
     process::ExitCode,
 };
 
-use rawler::{
-    decoders::*,
-    dng::convert::{convert_raw_stream, ConvertParams},
-    get_decoder, RawFile,
-};
-
-use chrono::NaiveDateTime;
 use clap::{
     arg,
     builder::{
-        styling::{AnsiColor, Style},
+        styling::{AnsiColor, Color, Style},
         Styles,
     },
     command, ArgAction, Args, Parser,
 };
-use error::{AppError, ConvertError};
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator};
+
+use chrono::NaiveDateTime;
+use rawler::{decoders::*, dng::convert, get_decoder, RawFile};
+use rayon::{prelude::*, ThreadPoolBuilder};
 use smlog::{debug, error, ignore, info, log::LevelFilter, warn, Log};
 
 fn n_threads() -> usize {
     std::thread::available_parallelism().unwrap().get()
 }
 
-fn style() -> Styles {
+macro_rules! style {
+    ($style:expr) => {
+        Style::new().fg_color(Some(Color::Ansi($style)))
+    };
+}
+
+const fn cli_style() -> Styles {
     Styles::styled()
-        .header(Style::new().fg_color(Some(AnsiColor::Yellow.into())))
-        .error(Style::new().fg_color(Some(AnsiColor::Red.into())))
-        .literal(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
-        .invalid(Style::new().fg_color(Some(AnsiColor::Red.into())))
-        .usage(Style::new().fg_color(Some(AnsiColor::White.into())))
-        .placeholder(Style::new().fg_color(Some(AnsiColor::Cyan.into())))
+        .header(style!(AnsiColor::Yellow))
+        .error(style!(AnsiColor::Red))
+        .literal(style!(AnsiColor::Cyan))
+        .invalid(style!(AnsiColor::Red))
+        .usage(style!(AnsiColor::White))
+        .placeholder(style!(AnsiColor::Cyan))
 }
 
 #[derive(Parser)]
@@ -55,7 +57,7 @@ fn style() -> Styles {
     about = "A camera RAW image preprocessor and importer",
     long_about = None,
     trailing_var_arg = true,
-    styles = style(),
+    styles = cli_style(),
     next_line_help = true,
     color = clap::ColorChoice::Always
 )]
@@ -143,7 +145,7 @@ struct ImageSource {
         value_name = "DIR",
         help = "directory containing raw files to convert"
     )]
-    src_path: Option<PathBuf>,
+    src_dir: Option<PathBuf>,
 
     #[arg(help = "individual files to convert", trailing_var_arg = true)]
     files: Option<Vec<PathBuf>>,
@@ -222,32 +224,70 @@ fn main() -> ExitCode {
         Err(err) => {
             use AppError::*;
 
-            #[allow(unused)]
-            let (s, e, code): (String, Option<&dyn Display>, u8) = match err {
+            let (err_str, cause, exit_code): (String, Option<&dyn Display>, u8) = match err {
                 FmtStrParse(e) => (e.to_string(), None, 1),
                 Io(s, ref e) => (s, Some(e), 2),
-
                 DirNotFound(s, ref e) => (format!("{s}: {}", e.display()), None, 3),
-
                 AlreadyExists(s, ref e) => (format!("{s}: {}", e.display()), None, 4),
-
                 Other(s, ref e) => (s, Some(e), 5),
             };
 
-            error!("{s}");
-            exit!(code)
+            error!("{err_str}");
+            if let Some(cause) = cause {
+                debug!("{cause}");
+            }
+
+            exit!(exit_code)
         }
 
         Ok(_) => exit!(0),
     }
 }
 
-macro_rules! map_err {
-    ($r:expr, $s:expr, $($err_t:tt)+) => {
-        $r.map_err(
-            |e| ($($err_t)+)($s.into(), e)
-        )
+macro_rules! map_app_err {
+    ($r:expr, $s:expr, $err_t:path) => {
+        $r.map_err(|e| ($err_t)($s.into(), e))
     };
+}
+
+macro_rules! map_convert_err {
+    ($r:expr, $s:expr, $dst_path:expr, $err_t:path) => {
+        $r.map_err(|e| ($dst_path, ($err_t)($s.into(), e)))
+    };
+}
+
+impl ImageSource {
+    pub fn get_files(self) -> Result<Vec<PathBuf>> {
+        if let Some(ref dir) = self.src_dir {
+            if !dir.exists() || !dir.is_dir() {
+                Err(AppError::DirNotFound(
+                    "source directory doesn't exist".into(),
+                    dir.clone(),
+                ))
+            } else {
+                let dir_stat = map_app_err!(
+                    fs::read_dir(dir),
+                    format!("couldn't stat directory: {}", dir.display()),
+                    AppError::Io
+                )?;
+
+                let paths = dir_stat
+                    .filter_map(|entry| entry.ok().map(|e| e.path()))
+                    .collect();
+
+                Ok(paths)
+            }
+        } else {
+            let files = self
+                .files
+                .expect("expected directory or path(s), got neither")
+                .into_iter()
+                .filter(|f| f.is_file())
+                .collect();
+
+            Ok(files)
+        }
+    }
 }
 
 fn run(args: ImportArgs) -> Result<()> {
@@ -262,46 +302,13 @@ fn run(args: ImportArgs) -> Result<()> {
         ..
     } = args;
 
-    rayon::ThreadPoolBuilder::new()
+    ThreadPoolBuilder::new()
         .num_threads(n_threads)
         .thread_name(|n| format!("rawbit-worker-{n}"))
         .build_global()
         .expect("failed to initialize worker threads");
 
-    let ingest = match source {
-        ImageSource {
-            src_path: Some(ref path),
-            files: None,
-        } => {
-            if !path.exists() {
-                return Err(AppError::DirNotFound(
-                    "source path doesn't exist".into(),
-                    path.into(),
-                ));
-            }
-
-            map_err!(
-                fs::read_dir(path),
-                format!("failed to stat source directory: {}", path.display()),
-                AppError::Io
-            )?
-            .filter_map(|p| match p {
-                Ok(p) => Some(p.path()),
-                Err(e) => {
-                    warn!("error while accessing an input file: {}", e);
-                    None
-                }
-            })
-            .collect::<Vec<_>>()
-        }
-
-        ImageSource {
-            src_path: None,
-            files: Some(paths),
-        } => paths,
-
-        _ => unreachable!(),
-    };
+    let ingest = source.get_files()?;
 
     if dst_path.exists() {
         if !dst_path.is_dir() {
@@ -313,7 +320,7 @@ fn run(args: ImportArgs) -> Result<()> {
             Ok(())
         }
     } else {
-        map_err!(
+        map_app_err!(
             fs::create_dir_all(&dst_path),
             "couldn't create destination directory",
             AppError::Io
@@ -330,30 +337,30 @@ fn run(args: ImportArgs) -> Result<()> {
     ingest
         .par_iter()
         .map(|path| -> ConvertResult {
+            assert!(path.exists());
+            assert!(path.is_file());
+
             let path_str = path.to_string_lossy();
 
-            let f = map_err!(
-                OpenOptions::new().read(true).write(false).open(path),
-                "can't open file",
-                ConvertError::Io
-            )
-            .map_err(|e| (path.clone(), e))?;
+            let in_file = OpenOptions::new().read(true).open(path);
+
+            let f = map_convert_err!(in_file, "can't open file", path.clone(), ConvertError::Io)?;
 
             let mut raw_file = RawFile::new(path, f);
 
-            let decoder = map_err!(
+            let decoder = map_convert_err!(
                 get_decoder(&mut raw_file),
                 "no compatible RAW image decoder available",
+                path.clone(),
                 ConvertError::ImgOp
-            )
-            .map_err(|e| (path.clone(), e))?;
+            )?;
 
-            let md = map_err!(
+            let md = map_convert_err!(
                 decoder.raw_metadata(&mut raw_file, Default::default()),
                 "couldn't extract image metadata",
+                path.clone(),
                 ConvertError::ImgOp
-            )
-            .map_err(|e| (path.clone(), e))?;
+            )?;
 
             let orig_fname = path
                 .file_stem()
@@ -385,7 +392,7 @@ fn run(args: ImportArgs) -> Result<()> {
                         )),
                     ));
                 } else {
-                    map_err!(
+                    map_app_err!(
                         fs::remove_file(&out_path),
                         format!("couldn't remove existing file: {}", out_path.display()),
                         ConvertError::Io
@@ -396,7 +403,7 @@ fn run(args: ImportArgs) -> Result<()> {
 
             let mut raw_output_stream = Cursor::new(vec![]);
 
-            let cvt_params = ConvertParams {
+            let cvt_params = convert::ConvertParams {
                 preview: true,
                 thumbnail: true,
                 embedded: embed,
@@ -410,36 +417,40 @@ fn run(args: ImportArgs) -> Result<()> {
                 .seek(SeekFrom::Start(0))
                 .unwrap_or_else(|_| panic!("file IO seeking error: {}", path.display()));
 
-            map_err!(
-                convert_raw_stream(
-                    raw_file.file,
-                    &mut raw_output_stream,
-                    &path_str,
-                    &cvt_params,
-                ),
+            let cvt_result = convert::convert_raw_stream(
+                raw_file.file,
+                &mut raw_output_stream,
+                &path_str,
+                &cvt_params,
+            );
+
+            map_convert_err!(
+                cvt_result,
                 "couldn't convert image to DNG",
+                path.clone(),
                 ConvertError::ImgOp
-            )
-            .map_err(|e| (path.clone(), e))?;
+            )?;
 
             raw_output_stream
                 .seek(SeekFrom::Start(0))
                 // i don't know if this will ever fail unless ENOMEM
                 .expect("in-memory IO seeking error");
 
-            let mut out_file = map_err!(
-                OpenOptions::new()
-                    .write(true)
-                    .create_new(true)
-                    .open(&out_path),
+            let out_file = OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&out_path);
+
+            let mut out_file = map_convert_err!(
+                out_file,
                 format!("couldn't create output file: {}", out_path.display()),
+                path.clone(),
                 ConvertError::Io
-            )
-            .map_err(|e| (path.clone(), e))?;
+            )?;
 
             info!("Writing DNG: \"{}\"", path.display());
 
-            map_err!(
+            map_app_err!(
                 io::copy(&mut raw_output_stream, &mut out_file),
                 format!(
                     "couldn't write converted DNG to disk: {}",
@@ -452,25 +463,19 @@ fn run(args: ImportArgs) -> Result<()> {
             Ok(())
         })
         .for_each(|result| {
-            let err_info: std::result::Result<(), (&Path, &str, Option<&dyn Display>)> =
-                match &result {
-                    Err((p, e)) => match e {
-                        ConvertError::AlreadyExists(s) => Err((p, s, None)),
-
-                        ConvertError::Io(s, e) => Err((p, s, Some(e))),
-                        ConvertError::ImgOp(s, e) => Err((p, s, Some(e))),
-                        ConvertError::Other(s, e) => Err((p, s, Some(e))),
-                    },
-
-                    _ => Ok(()),
+            if let Err((path, cvt_err)) = result {
+                let (err_str, cause): (&str, Option<&dyn Display>) = match cvt_err {
+                    ConvertError::AlreadyExists(ref err_str) => (err_str, None),
+                    ConvertError::Io(ref err_str, ref cause) => (err_str, Some(cause)),
+                    ConvertError::ImgOp(ref err_str, ref cause) => (err_str, Some(cause)),
+                    ConvertError::Other(ref err_str, ref cause) => (err_str, Some(cause)),
                 };
 
-            if let Err((p, s, e)) = err_info {
-                warn!("while processing \"{}\": {s}", p.display());
-                if let Some(dbg) = e {
+                warn!("while processing \"{}\": {err_str}", path.display());
+                if let Some(dbg) = cause {
                     debug!("Cause of last error:\n{dbg}");
                 }
-            };
+            }
         });
 
     Ok(())
