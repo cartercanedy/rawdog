@@ -249,10 +249,11 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
         state = ScanState::Start;
     }
 
-    const IMG_SEQ_MD_ITEM: FmtItem<'static> = FmtItem::Metadata(MetadataKind::ImageSequenceNumber);
+    const IMG_ORIG_FNAME_ITEM: FmtItem<'static> =
+        FmtItem::Metadata(MetadataKind::ImageOriginalFilename);
 
-    if !items.contains(&IMG_SEQ_MD_ITEM) {
-        items.push(IMG_SEQ_MD_ITEM)
+    if !items.contains(&IMG_ORIG_FNAME_ITEM) {
+        items.push(IMG_ORIG_FNAME_ITEM)
     }
 
     Ok(items.into_boxed_slice())
@@ -260,7 +261,7 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
 
 #[cfg(test)]
 mod test_parse {
-    use super::{FmtItem, OPEN_EXPANSION};
+    use super::{FmtItem, MetadataKind, OPEN_EXPANSION};
 
     use super::parse_name_format;
     #[test]
@@ -277,19 +278,37 @@ mod test_parse {
 
     #[test]
     fn escaped_double_squirly_brace_only_prints_one() {
-        let escaped = format!("{}{}%Y", &OPEN_EXPANSION, &OPEN_EXPANSION);
+        let escaped = format!(
+            "{}{}%Y{{image.original_filename}}",
+            &OPEN_EXPANSION, &OPEN_EXPANSION
+        );
         let parsed = parse_name_format(&escaped);
 
         assert!(parsed.is_ok());
 
         let parsed = parsed.unwrap();
 
-        assert!(parsed.len() == 2);
+        assert!(parsed.len() == 3);
 
         assert!(matches!(
             parsed[0], FmtItem::Literal(ref s) if s.chars().next().unwrap() == OPEN_EXPANSION && s.len() == 1
         ));
 
         assert!(matches!(parsed[1], FmtItem::DateTime(..)));
+    }
+
+    #[test]
+    fn inserts_fname_automatically() {
+        const FMT_STR_NO_FNAME: &str = "%Y";
+
+        let parsed = parse_name_format(FMT_STR_NO_FNAME).unwrap();
+
+        assert_eq!(
+            parsed.as_ref(),
+            &[
+                FmtItem::DateTime("%Y".into()),
+                FmtItem::Metadata(MetadataKind::ImageOriginalFilename)
+            ]
+        )
     }
 }
