@@ -100,12 +100,13 @@ impl Display for ParseError {
 
 impl Error for ParseError {}
 
+#[derive(Debug)]
 pub enum ConvertError {
     ImgOp(String, RawlerError),
     Io(String, io::Error),
     AlreadyExists(String),
     #[allow(unused)]
-    Other(String, Box<dyn Error + Send>),
+    Other(String, Box<dyn Error + Send + Sync>),
 }
 
 #[derive(Debug)]
@@ -115,5 +116,13 @@ pub enum AppError {
     DirNotFound(String, PathBuf),
     AlreadyExists(String, PathBuf),
     #[allow(unused)]
-    Other(String, Box<dyn Error + Send>),
+    Other(String, Box<dyn Error + Send + Sync>),
 }
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl Error for AppError {}

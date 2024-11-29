@@ -9,7 +9,7 @@ use rawler::decoders::RawMetadata;
 
 use crate::{
     error::{AppError, ParseError, ParseErrorType},
-    Result,
+    RawbitResult,
 };
 
 #[repr(u8)]
@@ -89,6 +89,8 @@ pub enum FmtItem<'a> {
     Metadata(MetadataKind),
 }
 
+unsafe impl<'a> Sync for FmtItem<'a> {}
+
 // I have to do this bc nvim is dumb dumb and can't tell that a quoted open squirly brace isn't a
 // new code block...
 //
@@ -126,7 +128,7 @@ fn expand(s: &str) -> Option<FmtItem> {
 }
 
 #[allow(unused_parens)]
-pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
+pub fn parse_name_format(fmt: &str) -> RawbitResult<Box<[FmtItem]>> {
     let mut items = vec![];
     let mut to_parse = fmt;
 
@@ -202,7 +204,7 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
                             return Err(AppError::FmtStrParse(ParseError::invalid_expansion(
                                 consumed,
                                 s.len(),
-                                fmt,
+                                to_parse,
                             )));
                         }
 
@@ -213,19 +215,19 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
                         assert!(
                             s.starts_with(OPEN_EXPANSION),
                             "An expansion was interpreted incorrectly: fmt: {}, seq: {}",
-                            fmt,
+                            to_parse,
                             s
                         );
 
                         if s.ends_with(CLOSE_EXPANSION) {
                             expand(&s[1..s.len() - 1]).ok_or(AppError::FmtStrParse(
-                                ParseError::invalid_expansion(consumed, s.len(), fmt),
+                                ParseError::invalid_expansion(consumed, s.len(), to_parse),
                             ))?
                         } else {
                             return Err(AppError::FmtStrParse(ParseError::unterminated_expansion(
                                 consumed,
                                 s.len(),
-                                fmt,
+                                to_parse,
                             )));
                         }
                     }
@@ -240,8 +242,8 @@ pub fn parse_name_format(fmt: &str) -> Result<Box<[FmtItem]>> {
 
             return Err(AppError::FmtStrParse(ParseError::new(
                 consumed,
-                fmt.len() - consumed,
-                fmt,
+                to_parse.len() - consumed,
+                to_parse,
                 ParseErrorType::Unknown,
             )));
         }
