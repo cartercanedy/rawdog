@@ -8,14 +8,15 @@ use rawler::{
     dng::{self, convert::ConvertParams},
     get_decoder, RawFile,
 };
+
 use smlog::info;
 
-use crate::{error::ConvertError, map_err, parse::FmtItem, render_filename};
+use crate::{error::ConvertError, map_err, parse::FilenameFormat};
 
 pub struct Job {
     pub input_path: PathBuf,
     pub output_dir: PathBuf,
-    pub filename_format: &'static [FmtItem<'static>],
+    pub filename_format: &'static FilenameFormat<'static>,
     pub force: bool,
     pub convert_opts: ConvertParams,
 }
@@ -24,7 +25,7 @@ impl Job {
     pub fn new(
         input_path: PathBuf,
         output_dir: PathBuf,
-        filename_format: &'static [FmtItem<'static>],
+        filename_format: &'static FilenameFormat,
         force: bool,
         convert_opts: ConvertParams,
     ) -> Self {
@@ -79,8 +80,10 @@ impl Job {
                 .unwrap_or_else(|| panic!("couldn't deduce filename from {}", &src_path_str))
                 .to_string_lossy();
 
-            let output_filename =
-                render_filename(src_filename_root.as_ref(), &md, self.filename_format) + ".dng";
+            let output_filename = self
+                .filename_format
+                .render_filename(src_filename_root.as_ref(), &md)
+                + ".dng";
 
             let output_path = self.output_dir.join(output_filename);
 

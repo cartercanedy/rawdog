@@ -2,67 +2,25 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
+use std::{fmt::Display, process::ExitCode};
+
+use clap::Parser as _;
+use parse::FilenameFormat;
+use rawler::dng::{convert::ConvertParams, CropMode, DngCompression};
+use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
+use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
+use tokio::{fs, runtime::Builder};
+
 mod args;
 mod error;
 mod job;
 mod parse;
 
 use args::{ImportArgs, LogConfig};
-use clap::Parser as _;
 use error::{AppError, ConvertError};
 use job::Job;
-use parse::{parse_name_format, FmtItem};
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
-
-use std::{borrow::Cow, fmt::Display, process::ExitCode};
-
-use chrono::NaiveDateTime;
-use rawler::{
-    decoders,
-    dng::{convert::ConvertParams, CropMode, DngCompression},
-};
-use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
-use tokio::{fs, runtime::Builder};
-
-macro_rules! lazy_wrap {
-    ($closure:block) => {
-        std::cell::LazyCell::<_, Box<dyn FnOnce() -> _>>::new(Box::new(move || $closure))
-    };
-}
-
-pub(crate) use lazy_wrap;
 
 type RawbitResult<T> = std::result::Result<T, AppError>;
-
-fn render_filename(orig_fname: &str, md: &decoders::RawMetadata, items: &[FmtItem]) -> String {
-    let mut fname_str = String::new();
-
-    let date = lazy_wrap!({
-        let date_str = &md.exif.date_time_original.clone().unwrap_or_default();
-        NaiveDateTime::parse_from_str(date_str, EXIF_DT_FMT).ok()
-    });
-
-    for atom in items {
-        let rendered = match atom {
-            FmtItem::Literal(lit) => lit.clone(),
-            FmtItem::Metadata(md_kind) => md_kind.expand_with_metadata(md, orig_fname),
-
-            FmtItem::DateTime(item) => {
-                if let Some(date) = date.as_ref() {
-                    Cow::Owned(date.format(item.as_ref()).to_string())
-                } else {
-                    Cow::Borrowed("")
-                }
-            }
-        };
-
-        fname_str.push_str((rendered).as_ref());
-    }
-
-    fname_str
-}
-
-const EXIF_DT_FMT: &str = "%Y:%m:%d %H:%M:%S";
 
 macro_rules! exit {
     ($c:expr) => {
@@ -169,7 +127,7 @@ async fn run(args: ImportArgs) -> RawbitResult<()> {
     }?;
 
     let fmt_str = fmt_str.map(|s| s.leak() as &'static str).unwrap_or("");
-    let filename_format: &'static [FmtItem<'static>] = Box::<_>::leak(parse_name_format(fmt_str)?);
+    let filename_format = Box::<_>::leak(Box::new(FilenameFormat::parse(fmt_str)?));
 
     let opts = ConvertParams {
         artist,

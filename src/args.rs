@@ -1,7 +1,4 @@
-use rawler::decoders::supported_extensions;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use std::path::PathBuf;
-use tokio::fs;
 
 use clap::{
     arg,
@@ -11,8 +8,10 @@ use clap::{
     },
     command, value_parser, ArgAction, Args, Parser,
 };
-
+use rawler::decoders::supported_extensions;
+use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
 use smlog::warn;
+use tokio::fs;
 use tokio_stream::{wrappers::ReadDirStream, StreamExt as _};
 
 use crate::{error::AppError, map_err, RawbitResult};

@@ -2,8 +2,9 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
-use std::borrow::Cow;
+use std::{borrow::Cow, cell::LazyCell};
 
+use chrono::NaiveDateTime;
 use phf::{phf_map, Map};
 use rawler::decoders::RawMetadata;
 
@@ -89,7 +90,171 @@ pub enum FmtItem<'a> {
     Metadata(MetadataKind),
 }
 
-unsafe impl<'a> Sync for FmtItem<'a> {}
+#[derive(Debug)]
+pub struct FilenameFormat<'a>(Box<[FmtItem<'a>]>);
+
+impl<'a> FilenameFormat<'a> {
+    pub fn render_filename(&self, original_filename: &str, md: &RawMetadata) -> String {
+        const EXIF_DT_FMT: &str = "%Y:%m:%d %H:%M:%S";
+
+        let mut fname_str = String::new();
+
+        let date = LazyCell::<_, Box<dyn FnOnce() -> _>>::new(Box::new(move || {
+            let date_str = &md.exif.date_time_original.clone().unwrap_or_default();
+            NaiveDateTime::parse_from_str(date_str, EXIF_DT_FMT).ok()
+        }));
+
+        for atom in &self.0 {
+            let rendered = match atom {
+                FmtItem::Literal(lit) => lit.clone(),
+                FmtItem::Metadata(md_kind) => md_kind.expand_with_metadata(md, original_filename),
+
+                FmtItem::DateTime(item) => {
+                    if let Some(date) = date.as_ref() {
+                        Cow::Owned(date.format(item.as_ref()).to_string())
+                    } else {
+                        Cow::Borrowed("")
+                    }
+                }
+            };
+
+            fname_str.push_str((rendered).as_ref());
+        }
+
+        fname_str
+    }
+
+    pub fn parse(fmt: &'a str) -> RawbitResult<Self> {
+        let mut items = vec![];
+        let mut to_parse = fmt;
+
+        #[derive(Debug)]
+        enum ScanState {
+            Start,
+            Literal,
+            DateTime,
+            ExpansionStart,
+            ExpansionBody,
+        }
+
+        let mut consumed = 0;
+        let mut state = ScanState::Start;
+
+        while !to_parse.is_empty() {
+            let mut end = false;
+            let split_at = to_parse
+                .chars()
+                .zip(1..)
+                .take_while(|(c, _)| {
+                    use ScanState::*;
+                    match (&state, c) {
+                        _ if end => false,
+
+                        (Start, sym) => {
+                            state = match sym {
+                                '%' => DateTime,
+                                &OPEN_EXPANSION => ExpansionStart,
+                                _ => Literal,
+                            };
+
+                            true
+                        }
+
+                        (ExpansionStart, sym) => {
+                            (state, end) = if sym == &OPEN_EXPANSION {
+                                (Literal, true)
+                            } else {
+                                (ExpansionBody, false)
+                            };
+
+                            true
+                        }
+
+                        (DateTime, _) | (ExpansionBody, &CLOSE_EXPANSION) => {
+                            end = true;
+                            true
+                        }
+
+                        (Literal, '%' | &OPEN_EXPANSION) => false,
+
+                        _ => true,
+                    }
+                })
+                .last()
+                .unwrap()
+                .1;
+
+            if let Some((s, remainder)) = to_parse.split_at_checked(split_at) {
+                to_parse = remainder;
+
+                const DOUBLE_OPEN_BRACE: &str = ["{{", "}}"][0];
+                // catch escaped double left squirly braces, only render one
+                if s == DOUBLE_OPEN_BRACE {
+                    items.push(FmtItem::Literal(Cow::Borrowed(&s[0..1])));
+                } else {
+                    items.push(match state {
+                        ScanState::Literal => FmtItem::Literal(Cow::Borrowed(s)),
+
+                        ScanState::DateTime => {
+                            if s.len() != 2 {
+                                return Err(AppError::FmtStrParse(ParseError::invalid_expansion(
+                                    consumed,
+                                    s.len(),
+                                    to_parse,
+                                )));
+                            }
+
+                            FmtItem::DateTime(Cow::Borrowed(s))
+                        }
+
+                        ScanState::ExpansionBody => {
+                            assert!(
+                                s.starts_with(OPEN_EXPANSION),
+                                "An expansion was interpreted incorrectly: fmt: {}, seq: {}",
+                                to_parse,
+                                s
+                            );
+
+                            if s.ends_with(CLOSE_EXPANSION) {
+                                expand(&s[1..s.len() - 1]).ok_or(AppError::FmtStrParse(
+                                    ParseError::invalid_expansion(consumed, s.len(), to_parse),
+                                ))?
+                            } else {
+                                return Err(AppError::FmtStrParse(
+                                    ParseError::unterminated_expansion(consumed, s.len(), to_parse),
+                                ));
+                            }
+                        }
+
+                        _ => unreachable!(),
+                    });
+                }
+
+                consumed += s.len();
+            } else {
+                dbg!(items, &state);
+
+                return Err(AppError::FmtStrParse(ParseError::new(
+                    consumed,
+                    to_parse.len() - consumed,
+                    to_parse,
+                    ParseErrorType::Unknown,
+                )));
+            }
+
+            state = ScanState::Start;
+        }
+
+        const IMG_ORIG_FNAME_ITEM: FmtItem<'static> =
+            FmtItem::Metadata(MetadataKind::ImageOriginalFilename);
+
+        if !items.contains(&IMG_ORIG_FNAME_ITEM) {
+            items.push(IMG_ORIG_FNAME_ITEM)
+        }
+
+        Ok(Self(items.into_boxed_slice()))
+    }
+}
 
 // I have to do this bc nvim is dumb dumb and can't tell that a quoted open squirly brace isn't a
 // new code block...
@@ -127,155 +292,21 @@ fn expand(s: &str) -> Option<FmtItem> {
     Some(FmtItem::Metadata(MD_KIND_MAP.get(s)?.to_owned()))
 }
 
-#[allow(unused_parens)]
-pub fn parse_name_format(fmt: &str) -> RawbitResult<Box<[FmtItem]>> {
-    let mut items = vec![];
-    let mut to_parse = fmt;
-
-    #[derive(Debug)]
-    enum ScanState {
-        Start,
-        Literal,
-        DateTime,
-        ExpansionStart,
-        ExpansionBody,
-    }
-
-    let mut consumed = 0;
-    let mut state = ScanState::Start;
-
-    while !to_parse.is_empty() {
-        let mut end = false;
-        let split_at = to_parse
-            .chars()
-            .zip(1..)
-            .take_while(|(c, _)| {
-                use ScanState::*;
-                match (&state, c) {
-                    _ if end => false,
-
-                    (Start, sym) => {
-                        state = match sym {
-                            '%' => DateTime,
-                            &OPEN_EXPANSION => ExpansionStart,
-                            _ => Literal,
-                        };
-
-                        true
-                    }
-
-                    (ExpansionStart, sym) => {
-                        (state, end) = if sym == &OPEN_EXPANSION {
-                            (Literal, true)
-                        } else {
-                            (ExpansionBody, false)
-                        };
-
-                        true
-                    }
-
-                    (DateTime, _) | (ExpansionBody, &CLOSE_EXPANSION) => {
-                        end = true;
-                        true
-                    }
-
-                    (Literal, '%' | &OPEN_EXPANSION) => false,
-
-                    _ => true,
-                }
-            })
-            .last()
-            .unwrap()
-            .1;
-
-        if let Some((s, remainder)) = to_parse.split_at_checked(split_at) {
-            to_parse = remainder;
-
-            const DOUBLE_OPEN_BRACE: &str = ["{{", "}}"][0];
-            // catch escaped double left squirly braces, only render one
-            if s == DOUBLE_OPEN_BRACE {
-                items.push(FmtItem::Literal(Cow::Borrowed(&s[0..1])));
-            } else {
-                items.push(match state {
-                    ScanState::Literal => FmtItem::Literal(Cow::Borrowed(s)),
-
-                    ScanState::DateTime => {
-                        if s.len() != 2 {
-                            return Err(AppError::FmtStrParse(ParseError::invalid_expansion(
-                                consumed,
-                                s.len(),
-                                to_parse,
-                            )));
-                        }
-
-                        FmtItem::DateTime(Cow::Borrowed(s))
-                    }
-
-                    ScanState::ExpansionBody => {
-                        assert!(
-                            s.starts_with(OPEN_EXPANSION),
-                            "An expansion was interpreted incorrectly: fmt: {}, seq: {}",
-                            to_parse,
-                            s
-                        );
-
-                        if s.ends_with(CLOSE_EXPANSION) {
-                            expand(&s[1..s.len() - 1]).ok_or(AppError::FmtStrParse(
-                                ParseError::invalid_expansion(consumed, s.len(), to_parse),
-                            ))?
-                        } else {
-                            return Err(AppError::FmtStrParse(ParseError::unterminated_expansion(
-                                consumed,
-                                s.len(),
-                                to_parse,
-                            )));
-                        }
-                    }
-
-                    _ => unreachable!(),
-                });
-            }
-
-            consumed += s.len();
-        } else {
-            dbg!(items, &state);
-
-            return Err(AppError::FmtStrParse(ParseError::new(
-                consumed,
-                to_parse.len() - consumed,
-                to_parse,
-                ParseErrorType::Unknown,
-            )));
-        }
-
-        state = ScanState::Start;
-    }
-
-    const IMG_ORIG_FNAME_ITEM: FmtItem<'static> =
-        FmtItem::Metadata(MetadataKind::ImageOriginalFilename);
-
-    if !items.contains(&IMG_ORIG_FNAME_ITEM) {
-        items.push(IMG_ORIG_FNAME_ITEM)
-    }
-
-    Ok(items.into_boxed_slice())
-}
-
 #[cfg(test)]
 mod test_parse {
-    use super::{FmtItem, MetadataKind, OPEN_EXPANSION};
+    use crate::parse::FilenameFormat;
 
-    use super::parse_name_format;
+    use super::{FmtItem, MetadataKind, OPEN_EXPANSION};
     #[test]
     fn parses_expansions_and_strftime_ok() {
-        assert!(parse_name_format("%Y-%m-%d_{camera.make}").is_ok())
+        assert!(FilenameFormat::parse("%Y-%m-%d_{camera.make}").is_ok())
     }
 
     #[test]
     fn fails_to_parse_incomplete_expansion() {
         // again with the bad bracket parsing
         const BAD_EXPANSION: &str = ["{camera.make", "}"][0];
-        assert!(parse_name_format(BAD_EXPANSION).is_err())
+        assert!(FilenameFormat::parse(BAD_EXPANSION).is_err())
     }
 
     #[test]
@@ -284,29 +315,29 @@ mod test_parse {
             "{}{}%Y{{image.original_filename}}",
             &OPEN_EXPANSION, &OPEN_EXPANSION
         );
-        let parsed = parse_name_format(&escaped);
+        let parsed = FilenameFormat::parse(&escaped);
 
         assert!(parsed.is_ok());
 
         let parsed = parsed.unwrap();
 
-        assert!(parsed.len() == 3);
+        assert!(parsed.0.len() == 3);
 
         assert!(matches!(
-            parsed[0], FmtItem::Literal(ref s) if s.chars().next().unwrap() == OPEN_EXPANSION && s.len() == 1
+            parsed.0[0], FmtItem::Literal(ref s) if s.chars().next().unwrap() == OPEN_EXPANSION && s.len() == 1
         ));
 
-        assert!(matches!(parsed[1], FmtItem::DateTime(..)));
+        assert!(matches!(parsed.0[1], FmtItem::DateTime(..)));
     }
 
     #[test]
     fn inserts_fname_automatically() {
         const FMT_STR_NO_FNAME: &str = "%Y";
 
-        let parsed = parse_name_format(FMT_STR_NO_FNAME).unwrap();
+        let parsed = FilenameFormat::parse(FMT_STR_NO_FNAME).unwrap();
 
         assert_eq!(
-            parsed.as_ref(),
+            parsed.0.as_ref(),
             &[
                 FmtItem::DateTime("%Y".into()),
                 FmtItem::Metadata(MetadataKind::ImageOriginalFilename)
