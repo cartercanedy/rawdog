@@ -126,7 +126,7 @@ async fn run(args: ImportArgs) -> RawbitResult<()> {
     }?;
 
     let fmt_str = fmt_str.map(|s| s.leak() as &'static str).unwrap_or("");
-    let filename_format = Box::<_>::leak(Box::new(FilenameFormat::parse(fmt_str)?));
+    let filename_format = Box::leak(Box::new(FilenameFormat::parse(fmt_str)?));
 
     let opts = ConvertParams {
         artist,
