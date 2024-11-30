@@ -2,7 +2,7 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
-use std::{fmt::Display, process::ExitCode};
+use std::{fmt::Display, process};
 
 use clap::Parser as _;
 use parse::FilenameFormat;
@@ -20,15 +20,22 @@ use args::{ImportArgs, LogConfig};
 use error::{AppError, ConvertError};
 use job::Job;
 
-type RawbitResult<T> = std::result::Result<T, AppError>;
-
-macro_rules! exit {
-    ($c:expr) => {
-        std::process::ExitCode::from($c)
+macro_rules! map_err {
+    ($r:expr, $err_t:path, $($s:expr),+ $(,)?) => {
+        $r.map_err(|e| ($err_t)($($s.into()),+, e))
     };
 }
 
-fn main() -> ExitCode {
+pub(crate) use map_err;
+
+type RawbitResult<T> = std::result::Result<T, AppError>;
+
+#[inline(always)]
+fn exit(code: u8) {
+    process::exit(code.into())
+}
+
+fn main() {
     let args = ImportArgs::parse();
     let LogConfig {
         quiet,
@@ -81,20 +88,12 @@ fn main() -> ExitCode {
                 debug!("{cause}");
             }
 
-            exit!(exit_code)
+            exit(exit_code)
         }
 
-        Ok(_) => exit!(0),
+        Ok(_) => exit(0),
     }
 }
-
-macro_rules! map_err {
-    ($r:expr, $err_t:path, $($s:expr),+ $(,)?) => {
-        $r.map_err(|e| ($err_t)($($s.into()),+, e))
-    };
-}
-
-pub(crate) use map_err;
 
 async fn run(args: ImportArgs) -> RawbitResult<()> {
     let ImportArgs {

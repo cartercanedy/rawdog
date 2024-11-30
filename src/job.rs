@@ -1,10 +1,11 @@
 use std::{
     fs::{remove_file, OpenOptions},
-    io::{BufReader, BufWriter, SeekFrom},
+    io::{BufReader, BufWriter},
     path::PathBuf,
 };
 
 use rawler::{
+    decoders::RawMetadata,
     dng::{self, convert::ConvertParams},
     get_decoder, RawFile,
 };
@@ -41,99 +42,110 @@ impl Job {
         }
     }
 
-    pub async fn run(self) -> Result<(), ConvertError> {
-        tokio::task::spawn_blocking(move || {
-            let input = OpenOptions::new()
+    fn get_output_path(&self, md: &RawMetadata) -> Result<PathBuf, ConvertError> {
+        let input_filename_root = self
+            .input_path
+            .file_stem()
+            .unwrap_or_else(|| {
+                panic!(
+                    "couldn't deduce filename from {}",
+                    self.input_path.display()
+                )
+            })
+            .to_string_lossy();
+
+        let output_filename = self
+            .filename_format
+            .render_filename(input_filename_root.as_ref(), md)
+            + ".dng";
+
+        let output_path = self.output_dir.join(output_filename + ".dng");
+
+        if output_path.exists() {
+            if !self.force {
+                Err(ConvertError::AlreadyExists(format!(
+                    "won't overwrite existing file: {}",
+                    output_path.display()
+                )))
+            } else if output_path.is_dir() {
+                Err(ConvertError::AlreadyExists(format!(
+                    "computed filepath already exists as a directory: {}",
+                    output_path.display()
+                )))
+            } else {
+                map_err!(
+                    remove_file(&output_path),
+                    ConvertError::Io,
+                    format!("couldn't remove existing file: {}", output_path.display()),
+                )
+            }?
+        }
+
+        Ok(output_path)
+    }
+
+    fn run_blocking(self) -> Result<(), ConvertError> {
+        let input = map_err!(
+            OpenOptions::new()
                 .read(true)
                 .write(false)
-                .open(&self.input_path);
+                .open(&self.input_path),
+            ConvertError::Io,
+            "Couldn't open input RAW file",
+        )?;
 
-            let input = map_err!(input, ConvertError::Io, "Couldn't open input file")?;
+        let mut raw_file = RawFile::new(self.input_path.as_path(), BufReader::new(input));
 
-            let reader = BufReader::new(input);
+        let decoder = map_err!(
+            get_decoder(&mut raw_file),
+            ConvertError::ImgOp,
+            "no compatible RAW image decoder available",
+        )?;
 
-            let mut raw_file = RawFile::new(self.input_path.as_path(), reader);
+        let md = map_err!(
+            decoder.raw_metadata(&mut raw_file, Default::default()),
+            ConvertError::ImgOp,
+            "couldn't extract image metadata",
+        )?;
 
-            let decoder = map_err!(
-                get_decoder(&mut raw_file),
-                ConvertError::ImgOp,
-                "no compatible RAW image decoder available",
-            )?;
+        map_err!(
+            raw_file.file.rewind(),
+            ConvertError::Io,
+            "input file io error",
+        )?;
 
-            let md = map_err!(
-                decoder.raw_metadata(&mut raw_file, Default::default()),
-                ConvertError::ImgOp,
-                "couldn't extract image metadata",
-            )?;
+        let output_path = self.get_output_path(&md)?;
 
-            map_err!(
-                raw_file.file.seek(SeekFrom::Start(0)),
-                ConvertError::Io,
-                "input file io error",
-            )?;
+        let output_file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&output_path);
 
-            let src_path_str = self.input_path.to_string_lossy().to_string();
+        let mut output_file = BufWriter::new(map_err!(
+            output_file,
+            ConvertError::Io,
+            format!("couldn't create output file: {}", output_path.display()),
+        )?);
 
-            let src_filename_root = self
-                .input_path
-                .file_stem()
-                .unwrap_or_else(|| panic!("couldn't deduce filename from {}", &src_path_str))
-                .to_string_lossy();
+        info!("Writing DNG: \"{}\"", output_path.display());
 
-            let output_filename = self
-                .filename_format
-                .render_filename(src_filename_root.as_ref(), &md)
-                + ".dng";
+        let cvt_result = dng::convert::convert_raw_stream(
+            raw_file.file,
+            &mut output_file,
+            self.input_path.to_string_lossy(),
+            &self.convert_opts,
+        );
 
-            let output_path = self.output_dir.join(output_filename);
+        map_err!(
+            cvt_result,
+            ConvertError::ImgOp,
+            "couldn't convert image to DNG",
+        )
+    }
 
-            if output_path.exists() {
-                if !self.force {
-                    return Err(ConvertError::AlreadyExists(format!(
-                        "won't overwrite existing file: {}",
-                        output_path.display()
-                    )));
-                } else if output_path.is_dir() {
-                    return Err(ConvertError::AlreadyExists(format!(
-                        "computed filepath already exists as a directory: {}",
-                        output_path.display()
-                    )));
-                } else {
-                    map_err!(
-                        remove_file(&output_path),
-                        ConvertError::Io,
-                        format!("couldn't remove existing file: {}", output_path.display()),
-                    )?
-                };
-            }
-
-            let output_file = OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&output_path);
-
-            let mut output_file = BufWriter::new(map_err!(
-                output_file,
-                ConvertError::Io,
-                format!("couldn't create output file: {}", output_path.display()),
-            )?);
-
-            info!("Writing DNG: \"{}\"", output_path.display());
-
-            let cvt_result = dng::convert::convert_raw_stream(
-                raw_file.file,
-                &mut output_file,
-                &src_path_str,
-                &self.convert_opts,
-            );
-
-            map_err!(
-                cvt_result,
-                ConvertError::ImgOp,
-                "couldn't convert image to DNG",
-            )
-        })
-        .await
-        .unwrap()
+    pub async fn run(self) -> Result<(), ConvertError> {
+        tokio::task::spawn_blocking(|| self.run_blocking())
+            .await
+            .unwrap()
     }
 }
