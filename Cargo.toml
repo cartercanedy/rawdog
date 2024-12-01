@@ -2,8 +2,8 @@
 name = "rawbit"
 authors = ["Carter J. Canedy <cartercanedy42@gmail.com>"]
 description = "A camera RAW image preprocessor and importer"
-categories = ["imaging", "photography"]
-keywords = ["imaging", "photography", "image-post-processing", "camera-RAW", "RAW"]
+categories = ["multimedia::encoding", "multimedia::images", "command-line-utilities"]
+keywords = ["imaging", "photography", "camera-RAW", "RAW"]
 license = "MIT"
 repository = "https://github.com/cartercanedy/rawbit"
 version = "0.1.4"
