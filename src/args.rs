@@ -14,7 +14,7 @@ use smlog::warn;
 use tokio::fs;
 use tokio_stream::{wrappers::ReadDirStream, StreamExt as _};
 
-use crate::{error::AppError, map_err, RawbitResult};
+use crate::{map_err, AppError, RawbitResult};
 
 fn n_threads() -> usize {
     std::thread::available_parallelism().unwrap().get()
@@ -46,7 +46,7 @@ const fn cli_style() -> Styles {
     next_line_help = true,
     color = clap::ColorChoice::Always
 )]
-pub struct ImportArgs {
+pub struct ImportConfig {
     #[command(flatten)]
     pub source: ImageSource,
 
@@ -144,16 +144,42 @@ pub struct ImageSource {
 }
 
 impl ImageSource {
-    pub async fn get_ingest_items(self) -> RawbitResult<Vec<PathBuf>> {
-        if let Some(ref dir) = self.src_dir {
-            if !dir.exists() || !dir.is_dir() {
-                Err(AppError::DirNotFound(
-                    "source directory doesn't exist".into(),
-                    dir.to_path_buf(),
-                ))
+    fn filter(path: PathBuf) -> Option<PathBuf> {
+        if path.is_file() {
+            let ext = path
+                .extension()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_default();
+
+            if supported_extensions().contains(&ext.as_ref()) {
+                Some(path)
             } else {
+                None
+            }
+        } else {
+            warn!("Ignoring {}: not a file", path.display());
+            None
+        }
+    }
+
+    fn process_files(self) -> Vec<PathBuf> {
+        self.files
+            .unwrap()
+            .into_par_iter()
+            .filter_map(Self::filter)
+            .collect::<Vec<_>>()
+    }
+
+    pub async fn get_ingest_items(self) -> RawbitResult<Vec<PathBuf>> {
+        assert!(
+            self.files.is_some() || self.src_dir.is_some(),
+            "expected input dir or a list of individual files, got neither"
+        );
+
+        if let Some(dir) = self.src_dir {
+            if dir.is_dir() {
                 let dir_stat = map_err!(
-                    fs::read_dir(dir).await,
+                    fs::read_dir(&dir).await,
                     AppError::Io,
                     format!("couldn't stat directory: {}", dir.display()),
                 )?;
@@ -164,32 +190,14 @@ impl ImageSource {
                     .await;
 
                 Ok(paths)
+            } else {
+                Err(AppError::DirNotFound(
+                    "source directory doesn't exist".into(),
+                    dir,
+                ))
             }
         } else {
-            let files = self
-                .files
-                .expect("expected directory or filepath(s), got neither")
-                .into_par_iter()
-                .filter_map(|input_path| {
-                    if !input_path.is_file() {
-                        warn!("Ignoring {}: not a file", input_path.display());
-                        None
-                    } else {
-                        let ext = input_path
-                            .extension()
-                            .map(|s| s.to_string_lossy().to_string())
-                            .unwrap_or_default();
-
-                        if supported_extensions().contains(&ext.as_ref()) {
-                            Some(input_path)
-                        } else {
-                            None
-                        }
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            Ok(files)
+            Ok(self.process_files())
         }
     }
 }

@@ -2,7 +2,21 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
-use std::{fmt::Display, process};
+#![warn(
+    clippy::all,
+    clippy::pedantic,
+    clippy::nursery,
+    clippy::cargo,
+    clippy::cast_possible_wrap
+)]
+#![allow(clippy::enum_glob_use, clippy::multiple_crate_versions)]
+
+use std::{
+    error::Error,
+    fmt::{self, Display},
+    io,
+    path::PathBuf,
+};
 
 use clap::Parser as _;
 use parse::FilenameFormat;
@@ -12,13 +26,29 @@ use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 use tokio::{fs, runtime::Builder};
 
 mod args;
-mod error;
 mod job;
 mod parse;
 
-use args::{ImportArgs, LogConfig};
-use error::{AppError, ConvertError};
+use args::{ImportConfig, LogConfig};
 use job::Job;
+
+#[derive(Debug)]
+pub enum AppError {
+    FmtStrParse(parse::Error),
+    Io(String, io::Error),
+    DirNotFound(String, PathBuf),
+    AlreadyExists(String, PathBuf),
+    #[allow(unused)]
+    Other(String, Box<dyn Error + Send + Sync>),
+}
+
+impl Display for AppError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl Error for AppError {}
 
 macro_rules! map_err {
     ($r:expr, $err_t:path, $($s:expr),+ $(,)?) => {
@@ -30,13 +60,8 @@ pub(crate) use map_err;
 
 type RawbitResult<T> = std::result::Result<T, AppError>;
 
-#[inline(always)]
-fn exit(code: u8) {
-    process::exit(code.into())
-}
-
-fn main() {
-    let args = ImportArgs::parse();
+fn main() -> Result<(), u32> {
+    let args = ImportConfig::parse();
     let LogConfig {
         quiet,
         verbose_logs,
@@ -75,7 +100,7 @@ fn main() {
         Err(err) => {
             use AppError::*;
 
-            let (err_str, cause, exit_code): (String, Option<&dyn Display>, u8) = match err {
+            let (err_str, cause, exit_code): (String, Option<&dyn Display>, _) = match err {
                 FmtStrParse(e) => (e.to_string(), None, 1),
                 Io(s, ref e) => (s, Some(e), 2),
                 DirNotFound(s, ref e) => (format!("{s}: {}", e.display()), None, 3),
@@ -88,15 +113,15 @@ fn main() {
                 debug!("{cause}");
             }
 
-            exit(exit_code)
+            Err(exit_code)
         }
 
-        Ok(_) => exit(0),
+        _ => Ok(()),
     }
 }
 
-async fn run(args: ImportArgs) -> RawbitResult<()> {
-    let ImportArgs {
+async fn run(args: ImportConfig) -> RawbitResult<()> {
+    let ImportConfig {
         source,
         dst_dir: output_dir,
         fmt_str,
@@ -109,13 +134,13 @@ async fn run(args: ImportArgs) -> RawbitResult<()> {
     let ingest = source.get_ingest_items().await?.leak();
 
     if output_dir.exists() {
-        if !output_dir.is_dir() {
+        if output_dir.is_dir() {
+            Ok(())
+        } else {
             Err(AppError::AlreadyExists(
                 "destination path exists and isn't a directory".into(),
                 (&output_dir).into(),
             ))
-        } else {
-            Ok(())
         }
     } else {
         map_err!(
@@ -125,7 +150,7 @@ async fn run(args: ImportArgs) -> RawbitResult<()> {
         )
     }?;
 
-    let fmt_str = fmt_str.map(|s| s.leak() as &'static str).unwrap_or("");
+    let fmt_str = fmt_str.map_or("", |s| s.leak() as &'static str);
     let filename_format = Box::leak(Box::new(FilenameFormat::parse(fmt_str)?));
 
     let opts = ConvertParams {
@@ -165,10 +190,10 @@ async fn run(args: ImportArgs) -> RawbitResult<()> {
             .for_each(|(result, input_path)| {
                 if let Err(cvt_err) = result {
                     let (err_str, cause): (&str, Option<&dyn Display>) = match cvt_err {
-                        ConvertError::AlreadyExists(ref err_str) => (err_str, None),
-                        ConvertError::Io(ref err_str, ref cause) => (err_str, Some(cause)),
-                        ConvertError::ImgOp(ref err_str, ref cause) => (err_str, Some(cause)),
-                        ConvertError::Other(ref err_str, ref cause) => (err_str, Some(cause)),
+                        job::Error::AlreadyExists(ref err_str) => (err_str, None),
+                        job::Error::Io(ref err_str, ref cause) => (err_str, Some(cause)),
+                        job::Error::ImgOp(ref err_str, ref cause) => (err_str, Some(cause)),
+                        job::Error::Other(ref err_str, ref cause) => (err_str, Some(cause)),
                     };
 
                     warn!("while processing \"{}\": {err_str}", input_path.display());

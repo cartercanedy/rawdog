@@ -1,18 +1,28 @@
 use std::{
+    error,
     fs::{remove_file, OpenOptions},
-    io::{BufReader, BufWriter},
+    io::{self, BufReader, BufWriter},
     path::PathBuf,
 };
 
 use rawler::{
-    decoders::RawMetadata,
+    decoders::{RawDecodeParams, RawMetadata},
     dng::{self, convert::ConvertParams},
-    get_decoder, RawFile,
+    get_decoder, RawFile, RawlerError,
 };
 
 use smlog::info;
 
-use crate::{error::ConvertError, map_err, parse::FilenameFormat};
+use crate::{map_err, parse::FilenameFormat};
+
+#[derive(Debug)]
+pub enum Error {
+    ImgOp(String, RawlerError),
+    Io(String, io::Error),
+    AlreadyExists(String),
+    #[allow(unused)]
+    Other(String, Box<dyn error::Error + Send + Sync>),
+}
 
 pub struct Job {
     pub input_path: PathBuf,
@@ -42,7 +52,7 @@ impl Job {
         }
     }
 
-    fn get_output_path(&self, md: &RawMetadata) -> Result<PathBuf, ConvertError> {
+    fn get_output_path(&self, md: &RawMetadata) -> Result<PathBuf, Error> {
         let input_filename_root = self
             .input_path
             .file_stem()
@@ -63,34 +73,34 @@ impl Job {
 
         if output_path.exists() {
             if !self.force {
-                Err(ConvertError::AlreadyExists(format!(
+                Err(Error::AlreadyExists(format!(
                     "won't overwrite existing file: {}",
                     output_path.display()
                 )))
             } else if output_path.is_dir() {
-                Err(ConvertError::AlreadyExists(format!(
+                Err(Error::AlreadyExists(format!(
                     "computed filepath already exists as a directory: {}",
                     output_path.display()
                 )))
             } else {
                 map_err!(
                     remove_file(&output_path),
-                    ConvertError::Io,
+                    Error::Io,
                     format!("couldn't remove existing file: {}", output_path.display()),
                 )
-            }?
+            }?;
         }
 
         Ok(output_path)
     }
 
-    fn run_blocking(self) -> Result<(), ConvertError> {
+    fn run_blocking(self) -> Result<(), Error> {
         let input = map_err!(
             OpenOptions::new()
                 .read(true)
                 .write(false)
                 .open(&self.input_path),
-            ConvertError::Io,
+            Error::Io,
             "Couldn't open input RAW file",
         )?;
 
@@ -98,21 +108,17 @@ impl Job {
 
         let decoder = map_err!(
             get_decoder(&mut raw_file),
-            ConvertError::ImgOp,
+            Error::ImgOp,
             "no compatible RAW image decoder available",
         )?;
 
         let md = map_err!(
-            decoder.raw_metadata(&mut raw_file, Default::default()),
-            ConvertError::ImgOp,
+            decoder.raw_metadata(&mut raw_file, RawDecodeParams::default()),
+            Error::ImgOp,
             "couldn't extract image metadata",
         )?;
 
-        map_err!(
-            raw_file.file.rewind(),
-            ConvertError::Io,
-            "input file io error",
-        )?;
+        map_err!(raw_file.file.rewind(), Error::Io, "input file io error",)?;
 
         let output_path = self.get_output_path(&md)?;
 
@@ -123,7 +129,7 @@ impl Job {
 
         let mut output_file = BufWriter::new(map_err!(
             output_file,
-            ConvertError::Io,
+            Error::Io,
             format!("couldn't create output file: {}", output_path.display()),
         )?);
 
@@ -136,14 +142,10 @@ impl Job {
             &self.convert_opts,
         );
 
-        map_err!(
-            cvt_result,
-            ConvertError::ImgOp,
-            "couldn't convert image to DNG",
-        )
+        map_err!(cvt_result, Error::ImgOp, "couldn't convert image to DNG",)
     }
 
-    pub async fn run(self) -> Result<(), ConvertError> {
+    pub async fn run(self) -> Result<(), Error> {
         tokio::task::spawn_blocking(|| self.run_blocking())
             .await
             .unwrap()
