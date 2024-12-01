@@ -25,14 +25,24 @@ while offering the ability to manipulate metadata and customize file name format
 
 ## Installation
 
-I plan on making binary releases available for all major platforms via package managers,
-but in the meantime, you'll need to have the Rust toolchain installed:
+I plan on making binary releases available for all major platforms via package managers.
+In the meantime, there are [AUR](https://aur.archlinux.org) & [crates.io](https://crates.io) packages available:
+
+### Arch Linux
+
+You can install rawbit with your preferred [AUR helper](https://wiki.archlinux.org/title/AUR_helpers). Example:
+
+```sh
+paru -S rawbit
+```
+
+### Crates.io
 
 1. Install [Rust](https://www.rust-lang.org/tools/install) and ensure `cargo` is available.
 2. Install via cargo:
-    ```sh
-    cargo install rawbit
-    ```
+```sh
+cargo install rawbit
+```
 
 ## Examples
 
