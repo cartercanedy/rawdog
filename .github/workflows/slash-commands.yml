@@ -1,0 +1,127 @@
+name: Issue slash commands
+
+on:
+  issue_comment:
+    types: [created, edited]
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GITHUB_REPO: ${{ github.repository }}
+  ISSUE_NUMBER: ${{ github.event.issue.number }}
+  COMMENT_BODY: ${{ github.event.comment.body }}
+
+jobs:
+  issueCommands:
+    # Skip this job if the comment was created/edited on a PR
+    if: ${{ !github.event.issue.pull_request }}
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+      pull-requests: none
+      contents: read
+
+    steps:
+      - run: echo "command=false" >> $GITHUB_ENV
+
+      - name: Check for /label command
+        id: check_label_command
+        env:
+          IS_LABEL_CMD: ${{ contains(github.event.comment.body, '/label' ) }}
+        run: |
+          if [[ "$IS_LABEL_CMD" == "true" ]]; then
+            echo "command=true" >> $GITHUB_ENV
+            LABEL_NAME=$(echo "$COMMENT_BODY" | awk -F"/label" '/\/label/ { match($2, /'\''([^'\'']*)'\''/, arr); if (arr[1] != "") print arr[1] }')
+            echo "label_command=true" >> $GITHUB_ENV
+            echo "label_name=${LABEL_NAME}" >> $GITHUB_ENV
+          else
+            echo "label_command=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check for /unlabel command
+        id: check_unlabel_command
+        env:
+          IS_UNLABEL_CMD: ${{ contains(github.event.comment.body, '/unlabel') }}
+        run: |
+          if [[ "$IS_UNLABEL_CMD" == "true" ]]; then
+            echo "command=true" >> $GITHUB_ENV
+            UNLABEL_NAME=$(echo "$COMMENT_BODY" | awk -F"/unlabel" '/\/unlabel/ { match($2, /'\''([^'\'']*)'\''/, arr); if (arr[1] != "") print arr[1] }')
+            echo "unlabel_command=true" >> $GITHUB_ENV
+            echo "unlabel_name=${UNLABEL_NAME}" >> $GITHUB_ENV
+          else
+            echo "unlabel_command=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check for /close command
+        id: check_close_command
+        env:
+          IS_CLOSE_CMD: ${{ contains(github.event.comment.body, '/close') }}
+        run: |
+          if [[ "$IS_CLOSE_CMD" == "true" ]]; then
+            echo "command=true" >> $GITHUB_ENV
+            echo "close_command=true" >> $GITHUB_ENV
+            echo "reopen_command=false" >> $GITHUB_ENV
+          else
+            echo "close_command=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check for /open or /reopen command
+        id: check_reopen_command
+        env:
+          IS_OPEN_CMD: ${{ contains(github.event.comment.body, '/open') }}
+          IS_REOPEN_CMD: ${{ contains(github.event.comment.body, '/reopen') }}
+        run: |
+          if [[ "$IS_OPEN_CMD" == "true" ]] || [[ "$IS_REOPEN_CMD" == "true" ]]; then
+            echo "command=true" >> $GITHUB_ENV
+            echo "reopen_command=true" >> $GITHUB_ENV
+            echo "close_command=false" >> $GITHUB_ENV
+          else
+            echo "reopen_command=false" >> $GITHUB_ENV
+          fi
+
+      - name: Check if the user is allowed
+        id: check_user
+        if: env.command == 'true'
+        env:
+          USERNAME: ${{ github.event.comment.user.login }}
+        run: |
+          if [ "$USERNAME" = "cartercanedy" ]; then
+            echo "user=true" >> $GITHUB_ENV
+          else
+            exit 0
+          fi
+
+      - name: Close issue
+        if: env.close_command == 'true'
+        env:
+          IS_NOT_PLANNED: ${{ contains(github.event.comment.body, 'not planned' ) }}
+        run: |
+          echo Closing the issue...
+          if [[ "$IS_NOT_PLANNED" == "true" ]]; then
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --reason 'not planned'
+          else
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPO"
+          fi
+
+      - name: Reopen issue
+        if: env.reopen_command == 'true'
+        env:
+        run: |
+          echo Reopening the issue...
+          gh issue reopen "$ISSUE_NUMBER" --repo "$GITHUB_REPO"
+
+      - name: Label issue
+        if: env.label_command == 'true'
+        env:
+          LABEL_NAME: ${{ env.label_name }}
+        run: |
+          echo Labeling the issue...
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "$LABEL_NAME"
+
+      - name: Remove labels
+        if: env.unlabel_command == 'true'
+        env:
+          LABEL_NAME: ${{ env.unlabel_name }}
+        run: |
+          echo Unlabeling the issue...
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --remove-label "$LABEL_NAME"
+
