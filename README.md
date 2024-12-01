@@ -15,15 +15,13 @@ while offering the ability to manipulate metadata and customize file name format
 
 - **RAW Image Conversion**: Converts camera RAW files to DNG format.
 - **Flexible Input/Output**:
-  - Process single files or entire directories.
+  - Process individual files or entire directories.
   - Define output directories with optional overwrite support.
 - **Custom Filename Formatting**: Supports user-defined naming conventions for output files.
 - **Metadata Handling**: Supports EXIF metadata manipulation
 - **Multi-Threaded Processing**: Leverages multiple CPU cores for parallel image processing.
 
 *__all written in Rust, btw...__*
-
-## Installation
 
 ## Installation
 
@@ -126,20 +124,12 @@ More metadata fields are a WIP, more to come soon...
 
 ## Why not use [`dnglab`](https://github.com/dnglab/dnglab)?
 
-`dnglab convert` is extremely versatile, but the inability to format the resulting
-converted DNG filenames is a dealbreaker coming from using Lightroom RAW import
-tooling.
+`dnglab convert` is extremely versatile and robust, but my main motivation for developing `rawbit` was to enable a more flexible batch DNG conversion/import workflow with entirely free (as in freedom) software enabling it.
 
-`rawbit`'s superpower is the ability to inspect the metadata of the file being converted
-into the filename of the converted DNG, making batch image processing that much easier
-to manage without expensive and proprietary software.
-
-`rawbit` actually uses the same RAW image processing library that was created by
-the maker of `dnglab`, named `rawler`.  
-I owe a huge thanks to the DNGLab team for their awesome work that made this project possible.
+This project utilizes the same library that powers DNGLab, so I owe a huge thanks to the DNGLab/Rawler team for their awesome work that made this project possible.
 
 ## Special thanks
 
 [DNGLab/Rawler](https://github.com/dnglab/dnglab/blob/main/rawler): Rust-native RAW image manipulation tools from the ground-up  
-[rayon](https://github.com/rayon-rs/rayon): For making fearless concurrency a peice of cake  
+[rayon](https://github.com/rayon-rs/rayon)/[tokio](https://github.com/tokio-rs/tokio): For making fearless concurrency a peice of cake  
 [Adam Perkowski](https://github.com/adamperkowski): Contributing CI and package manager support  
