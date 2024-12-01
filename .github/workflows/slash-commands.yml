@@ -93,10 +93,11 @@ jobs:
         env:
           IS_NOT_PLANNED: ${{ contains(github.event.comment.body, 'not planned' ) }}
         run: |
-          echo Closing the issue...
           if [[ "$IS_NOT_PLANNED" == "true" ]]; then
+            echo "Closing ${ISSUE_NUMBER} as not planned..."
             gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --reason 'not planned'
           else
+            echo "Closing ${ISSUE_NUMBER}..."
             gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPO"
           fi
 
@@ -111,7 +112,7 @@ jobs:
         env:
           LABEL_NAME: ${{ env.label_name }}
         run: |
-          echo Labeling the issue...
+          echo "Adding label ${LABEL_NAME} to issue ${ISSUE_NUMBER}..."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --add-label "$LABEL_NAME"
 
       - name: Remove labels
@@ -119,6 +120,6 @@ jobs:
         env:
           LABEL_NAME: ${{ env.unlabel_name }}
         run: |
-          echo Unlabeling the issue...
+          echo "Removing label ${LABEL_NAME} from issue ${ISSUE_NUMBER}..."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPO" --remove-label "$LABEL_NAME"
 
