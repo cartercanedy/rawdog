@@ -2,17 +2,19 @@ name: Rust
 
 on:
   push:
+    branches: ["master"]
     paths:
-      - '**/*.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/**/*'
+      - "**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust*.yml"
   pull_request:
+    branches: ["master"]
     paths:
-      - '**/*.rs'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - '.github/**/*'
+      - "**/*.rs"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/rust*.yml"
   workflow_dispatch:
 
 env:
