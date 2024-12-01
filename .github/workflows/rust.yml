@@ -6,13 +6,13 @@ on:
       - '**/*.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - '.github/**/*'
+      - '.github/workflows/rust*.yml'
   pull_request:
     paths:
       - '**/*.rs'
       - 'Cargo.toml'
       - 'Cargo.lock'
-      - '.github/**/*'
+      - '.github/workflows/rust*.yml'
   workflow_dispatch:
 
 env:
