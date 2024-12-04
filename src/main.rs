@@ -2,7 +2,7 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
-#![warn(
+#![deny(
     clippy::all,
     clippy::pedantic,
     clippy::nursery,
