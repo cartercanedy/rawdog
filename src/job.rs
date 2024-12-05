@@ -1,6 +1,6 @@
 use std::{
     error,
-    fs::{remove_file, OpenOptions},
+    fs::{create_dir_all, remove_file, OpenOptions},
     io::{self, BufReader, BufWriter},
     path::PathBuf,
 };
@@ -41,7 +41,6 @@ impl Job {
         convert_opts: ConvertParams,
     ) -> Self {
         assert!(input_path.is_file());
-        assert!(output_dir.is_dir());
 
         Self {
             input_path,
@@ -52,7 +51,7 @@ impl Job {
         }
     }
 
-    fn get_output_path(&self, md: &RawMetadata) -> Result<PathBuf, Error> {
+    fn build_output_path(&self, md: &RawMetadata) -> Result<PathBuf, Error> {
         let input_filename_root = self
             .input_path
             .file_stem()
@@ -69,27 +68,13 @@ impl Job {
             .render_filename(input_filename_root.as_ref(), md)
             + ".dng";
 
-        let output_path = self.output_dir.join(output_filename + ".dng");
+        map_err!(
+            create_dir_all(&self.output_dir),
+            Error::Io,
+            format!("couldn't make output dir: {}", self.output_dir.display())
+        )?;
 
-        if output_path.exists() {
-            if !self.force {
-                Err(Error::AlreadyExists(format!(
-                    "won't overwrite existing file: {}",
-                    output_path.display()
-                )))
-            } else if output_path.is_dir() {
-                Err(Error::AlreadyExists(format!(
-                    "computed filepath already exists as a directory: {}",
-                    output_path.display()
-                )))
-            } else {
-                map_err!(
-                    remove_file(&output_path),
-                    Error::Io,
-                    format!("couldn't remove existing file: {}", output_path.display()),
-                )
-            }?;
-        }
+        let output_path = self.output_dir.join(output_filename);
 
         Ok(output_path)
     }
@@ -120,7 +105,27 @@ impl Job {
 
         map_err!(raw_file.file.rewind(), Error::Io, "input file io error",)?;
 
-        let output_path = self.get_output_path(&md)?;
+        let output_path = self.build_output_path(&md)?;
+
+        if output_path.exists() {
+            if !self.force {
+                Err(Error::AlreadyExists(format!(
+                    "won't overwrite existing file: {}",
+                    output_path.display()
+                )))
+            } else if output_path.is_dir() {
+                Err(Error::AlreadyExists(format!(
+                    "computed filepath already exists as a directory: {}",
+                    output_path.display()
+                )))
+            } else {
+                map_err!(
+                    remove_file(&output_path),
+                    Error::Io,
+                    format!("couldn't remove existing file: {}", output_path.display()),
+                )
+            }?;
+        }
 
         let output_file = OpenOptions::new()
             .write(true)

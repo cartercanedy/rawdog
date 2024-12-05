@@ -254,8 +254,6 @@ impl<'a> FilenameFormat<'a> {
 
                 consumed += s.len();
             } else {
-                dbg!(items, &state);
-
                 return Err(AppError::FmtStrParse(Error::new(
                     consumed,
                     to_parse.len() - consumed,
