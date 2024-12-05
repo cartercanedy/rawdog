@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5](https://github.com/cartercanedy/rawbit/compare/v0.1.4...v0.1.5) - 2024-12-05
+
+### Added
+- optional subdirectory recursion and structure preservation ([#15](https://github.com/cartercanedy/rawbit/pull/15)) (by @cartercanedy) - #15
+
+### Documentation
+- *(README)* add Arch Linux installation instructions ([#13](https://github.com/cartercanedy/rawbit/pull/13)) (by @adamperkowski)
+
+### Contributors
+
+* @cartercanedy
+* @adamperkowski
+
 ## [0.1.4](https://github.com/cartercanedy/rawbit/compare/v0.1.3...v0.1.4) - 2024-12-01
 
 ### Documentation
