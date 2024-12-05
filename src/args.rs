@@ -12,8 +12,8 @@ use clap::{
     command, value_parser, ArgAction, Args, Parser,
 };
 use rawler::decoders::supported_extensions;
-use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
-use smlog::warn;
+use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
+use smlog::{debug, warn};
 
 use crate::{map_err, AppError, RawbitResult};
 
@@ -168,23 +168,26 @@ impl<I: AsRef<Path>, O: AsRef<Path>> From<(I, O)> for IngestItem {
 }
 
 impl RawSource {
+    fn is_supported_filetype(path: &Path) -> bool {
+        let ext = path
+            .extension()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_default();
+
+        supported_extensions().contains(&ext.as_ref()) || ext.to_lowercase() == "dng"
+    }
+
     fn ingest_files(files: Vec<PathBuf>) -> Vec<IngestItem> {
         files
             .into_par_iter()
-            .filter_map(|path| {
-                if path.is_file() {
-                    let ext = path
-                        .extension()
-                        .map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_default();
+            .filter_map(|ref item| {
+                if Self::is_supported_filetype(item) {
+                    debug!("found supported file: \"{}\"", item.display());
 
-                    if supported_extensions().contains(&ext.as_ref()) {
-                        Some((path, "").into())
-                    } else {
-                        None
-                    }
+                    Some((item, "").into())
                 } else {
-                    warn!("Ignoring {}: not a file", path.display());
+                    warn!("ignoring \"{}\": unsupported filetype", item.display());
+
                     None
                 }
             })
@@ -205,25 +208,37 @@ impl RawSource {
             format!("couldn't stat directory: {}", input_dir.display()),
         )?;
 
-        Ok(dir
-            // .par_bridge()
+        let files = dir
+            .par_bridge()
             .filter_map(|item| match item {
                 Ok(ref item) if item.path().is_dir() && recurse => {
                     let intermediate_dir = prefix.join(item.path().file_name().unwrap());
-                    Some(Self::ingest_dir(&item.path(), &intermediate_dir, recurse))
+
+                    Some(Self::ingest_dir(&item.path(), &intermediate_dir, true))
                 }
 
                 Ok(ref item) if item.path().is_file() => {
-                    Some(Ok(vec![(item.path(), prefix.to_path_buf()).into()]))
+                    let path = item.path();
+
+                    if Self::is_supported_filetype(&path) {
+                        debug!("found supported file: \"{}\"", path.display());
+
+                        Some(Ok(vec![(path, prefix.to_path_buf()).into()]))
+                    } else {
+                        warn!("ignoring \"{}\": unsupported filetype", path.display());
+
+                        None
+                    }
                 }
 
                 _ => None,
             })
             .collect::<RawbitResult<Vec<_>>>()?
-            .into_iter()
-            // .into_par_iter()
+            .into_par_iter()
             .flatten()
-            .collect::<Vec<_>>())
+            .collect::<Vec<_>>();
+
+        Ok(files)
     }
 
     pub fn ingest(self, recurse: bool) -> RawbitResult<Vec<IngestItem>> {
