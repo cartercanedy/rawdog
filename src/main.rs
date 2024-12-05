@@ -2,7 +2,7 @@
 // rawbit is free software, distributable under the terms of the MIT license
 // See https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/LICENSE.txt
 
-#![warn(
+#![deny(
     clippy::all,
     clippy::pedantic,
     clippy::nursery,
@@ -19,6 +19,7 @@ use std::{
 };
 
 use clap::Parser as _;
+use futures::future::join_all;
 use parse::FilenameFormat;
 use rawler::dng::{convert::ConvertParams, CropMode, DngCompression};
 use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
@@ -29,7 +30,7 @@ mod args;
 mod job;
 mod parse;
 
-use args::{ImportConfig, LogConfig};
+use args::{ImportConfig, IngestItem, LogConfig};
 use job::Job;
 
 #[derive(Debug)]
@@ -123,15 +124,16 @@ fn main() -> Result<(), u32> {
 async fn run(args: ImportConfig) -> RawbitResult<()> {
     let ImportConfig {
         source,
-        dst_dir: output_dir,
+        output_dir,
         fmt_str,
         artist,
         force,
         embed,
+        recurse,
         ..
     } = args;
 
-    let ingest = source.get_ingest_items().await?.leak();
+    let ingest = source.ingest(recurse)?.leak();
 
     if output_dir.exists() {
         if output_dir.is_dir() {
@@ -170,30 +172,33 @@ async fn run(args: ImportConfig) -> RawbitResult<()> {
         let jobs = chunk
             .par_iter()
             .cloned()
-            .map(|input_path| {
-                let job = Job::new(
-                    input_path,
-                    output_dir.clone(),
-                    filename_format,
-                    force,
-                    opts.clone(),
-                );
+            .map(
+                |IngestItem {
+                     input_path,
+                     ref output_prefix,
+                 }| {
+                    let output_dir = output_dir.join(output_prefix);
+                    let job =
+                        Job::new(input_path, output_dir, filename_format, force, opts.clone());
 
-                job.run()
-            })
+                    job.run()
+                },
+            )
             .collect::<Vec<_>>();
 
-        futures::future::join_all(jobs)
+        join_all(jobs)
             .await
             .into_iter()
-            .zip(chunk.iter())
+            .zip(chunk.iter().map(|item| item.input_path.clone()))
             .for_each(|(result, input_path)| {
                 if let Err(cvt_err) = result {
+                    use job::Error::*;
+
                     let (err_str, cause): (&str, Option<&dyn Display>) = match cvt_err {
-                        job::Error::AlreadyExists(ref err_str) => (err_str, None),
-                        job::Error::Io(ref err_str, ref cause) => (err_str, Some(cause)),
-                        job::Error::ImgOp(ref err_str, ref cause) => (err_str, Some(cause)),
-                        job::Error::Other(ref err_str, ref cause) => (err_str, Some(cause)),
+                        AlreadyExists(ref err_str) => (err_str, None),
+                        Io(ref err_str, ref cause) => (err_str, Some(cause)),
+                        ImgOp(ref err_str, ref cause) => (err_str, Some(cause)),
+                        Other(ref err_str, ref cause) => (err_str, Some(cause)),
                     };
 
                     warn!("while processing \"{}\": {err_str}", input_path.display());

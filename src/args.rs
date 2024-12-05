@@ -1,4 +1,7 @@
-use std::path::PathBuf;
+use std::{
+    fs::read_dir,
+    path::{Path, PathBuf},
+};
 
 use clap::{
     arg,
@@ -9,10 +12,8 @@ use clap::{
     command, value_parser, ArgAction, Args, Parser,
 };
 use rawler::decoders::supported_extensions;
-use rayon::iter::{IntoParallelIterator as _, ParallelIterator as _};
+use rayon::iter::{IntoParallelIterator, ParallelIterator as _};
 use smlog::warn;
-use tokio::fs;
-use tokio_stream::{wrappers::ReadDirStream, StreamExt as _};
 
 use crate::{map_err, AppError, RawbitResult};
 
@@ -48,7 +49,7 @@ const fn cli_style() -> Styles {
 )]
 pub struct ImportConfig {
     #[command(flatten)]
-    pub source: ImageSource,
+    pub source: RawSource,
 
     #[arg(
         short = 'o',
@@ -56,7 +57,7 @@ pub struct ImportConfig {
         value_name = "DIR",
         help = "directory to write converted DNGs"
     )]
-    pub dst_dir: PathBuf,
+    pub output_dir: PathBuf,
 
     #[arg(
         short = 'F',
@@ -100,6 +101,14 @@ pub struct ImportConfig {
     )]
     pub n_threads: usize,
 
+    #[arg(
+        short,
+        long,
+        default_value_t = false,
+        action = ArgAction::SetTrue
+    )]
+    pub recurse: bool,
+
     #[command(flatten)]
     pub log_config: LogConfig,
 }
@@ -125,7 +134,7 @@ pub struct LogConfig {
 
 #[derive(Args)]
 #[group(required = true, multiple = false)]
-pub struct ImageSource {
+pub struct RawSource {
     #[arg(
         short = 'i',
         long = "in-dir",
@@ -133,7 +142,7 @@ pub struct ImageSource {
         value_parser = value_parser!(PathBuf).into_resettable(),
         help = "directory containing raw files to convert"
     )]
-    pub src_dir: Option<PathBuf>,
+    pub input_dir: Option<PathBuf>,
 
     #[arg(
         help = "individual files to convert",
@@ -143,61 +152,212 @@ pub struct ImageSource {
     pub files: Option<Vec<PathBuf>>,
 }
 
-impl ImageSource {
-    fn filter(path: PathBuf) -> Option<PathBuf> {
-        if path.is_file() {
-            let ext = path
-                .extension()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_default();
+#[derive(Debug, Clone)]
+pub struct IngestItem {
+    pub input_path: PathBuf,
+    pub output_prefix: PathBuf,
+}
 
-            if supported_extensions().contains(&ext.as_ref()) {
-                Some(path)
-            } else {
-                None
-            }
-        } else {
-            warn!("Ignoring {}: not a file", path.display());
-            None
+impl<I: AsRef<Path>, O: AsRef<Path>> From<(I, O)> for IngestItem {
+    fn from(value: (I, O)) -> Self {
+        Self {
+            input_path: value.0.as_ref().to_path_buf(),
+            output_prefix: value.1.as_ref().to_path_buf(),
         }
     }
+}
 
-    fn process_files(self) -> Vec<PathBuf> {
-        self.files
-            .unwrap()
+impl RawSource {
+    fn ingest_files(files: Vec<PathBuf>) -> Vec<IngestItem> {
+        files
             .into_par_iter()
-            .filter_map(Self::filter)
+            .filter_map(|path| {
+                if path.is_file() {
+                    let ext = path
+                        .extension()
+                        .map(|s| s.to_string_lossy().to_string())
+                        .unwrap_or_default();
+
+                    if supported_extensions().contains(&ext.as_ref()) {
+                        Some((path, "").into())
+                    } else {
+                        None
+                    }
+                } else {
+                    warn!("Ignoring {}: not a file", path.display());
+                    None
+                }
+            })
             .collect::<Vec<_>>()
     }
 
-    pub async fn get_ingest_items(self) -> RawbitResult<Vec<PathBuf>> {
+    fn ingest_dir(input_dir: &Path, prefix: &Path, recurse: bool) -> RawbitResult<Vec<IngestItem>> {
+        if !input_dir.is_dir() {
+            return Err(AppError::DirNotFound(
+                "source directory doesn't exist".into(),
+                input_dir.to_path_buf(),
+            ));
+        }
+
+        let dir = map_err!(
+            read_dir(input_dir),
+            AppError::Io,
+            format!("couldn't stat directory: {}", input_dir.display()),
+        )?;
+
+        Ok(dir
+            // .par_bridge()
+            .filter_map(|item| match item {
+                Ok(ref item) if item.path().is_dir() && recurse => {
+                    let intermediate_dir = prefix.join(item.path().file_name().unwrap());
+                    Some(Self::ingest_dir(&item.path(), &intermediate_dir, recurse))
+                }
+
+                Ok(ref item) if item.path().is_file() => {
+                    Some(Ok(vec![(item.path(), prefix.to_path_buf()).into()]))
+                }
+
+                _ => None,
+            })
+            .collect::<RawbitResult<Vec<_>>>()?
+            .into_iter()
+            // .into_par_iter()
+            .flatten()
+            .collect::<Vec<_>>())
+    }
+
+    pub fn ingest(self, recurse: bool) -> RawbitResult<Vec<IngestItem>> {
         assert!(
-            self.files.is_some() || self.src_dir.is_some(),
+            self.files.is_some() || self.input_dir.is_some(),
             "expected input dir or a list of individual files, got neither"
         );
 
-        if let Some(dir) = self.src_dir {
-            if dir.is_dir() {
-                let dir_stat = map_err!(
-                    fs::read_dir(&dir).await,
-                    AppError::Io,
-                    format!("couldn't stat directory: {}", dir.display()),
-                )?;
-
-                let paths = ReadDirStream::new(dir_stat)
-                    .filter_map(|entry| entry.ok().map(|e| e.path()))
-                    .collect::<Vec<_>>()
-                    .await;
-
-                Ok(paths)
-            } else {
-                Err(AppError::DirNotFound(
-                    "source directory doesn't exist".into(),
-                    dir,
-                ))
-            }
+        if let Some(ref dir) = self.input_dir {
+            Self::ingest_dir(dir, &PathBuf::new(), recurse)
+        } else if let Some(files) = self.files {
+            Ok(Self::ingest_files(files))
         } else {
-            Ok(self.process_files())
+            unreachable!()
         }
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use std::{
+        fs::File,
+        io::Result,
+        path::{Path, PathBuf},
+    };
+    use tempfile::{tempdir, tempdir_in, TempDir};
+
+    use super::{IngestItem, RawSource};
+
+    fn setup_nested_dir(parent: Option<&Path>) -> Result<([TempDir; 2], Vec<PathBuf>)> {
+        let (input_dir, mut files) = setup_flat_dir(parent)?;
+        let (nested_dir, nested_files) = setup_flat_dir(Some(input_dir.path()))?;
+
+        files.extend(nested_files.into_iter());
+
+        Ok(([input_dir, nested_dir], files))
+    }
+
+    fn setup_flat_dir(parent: Option<&Path>) -> Result<(TempDir, Vec<PathBuf>)> {
+        let input_dir = match parent {
+            Some(dir) => tempdir_in(dir),
+            None => tempdir(),
+        }?;
+
+        let input_path = input_dir.path();
+        assert!(input_path.exists());
+
+        let temp_paths = (0..10)
+            .map(|i| {
+                let path = input_path.join(format!("temp_file_{}.ARW", i));
+                File::create(&path).unwrap();
+                path
+            })
+            .collect::<Vec<_>>();
+
+        Ok((input_dir, temp_paths))
+    }
+
+    #[test]
+    fn parses_flat_dir_correctly() -> Result<()> {
+        let (input_dir, temp_paths) = setup_flat_dir(None)?;
+        let input_path = input_dir.path();
+
+        let args = RawSource {
+            input_dir: Some(input_path.to_path_buf()),
+            files: None,
+        };
+
+        let ingest = args.ingest(false).unwrap();
+        assert_eq!(ingest.len(), 10);
+
+        for IngestItem {
+            input_path,
+            output_prefix,
+        } in ingest.iter()
+        {
+            assert!(temp_paths.contains(&input_path));
+            assert_eq!(output_prefix.to_string_lossy().len(), 0)
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_nested_dir_recursive_correctly() -> Result<()> {
+        let ([input_dir, _output_dir], temp_paths) = setup_nested_dir(None)?;
+        let input_path = input_dir.path();
+
+        let args = RawSource {
+            input_dir: Some(input_path.to_path_buf()),
+            files: None,
+        };
+
+        let ingest = args.ingest(true).unwrap();
+        assert_eq!(ingest.len(), 20);
+
+        for IngestItem {
+            ref input_path,
+            ref output_prefix,
+        } in ingest.iter()
+        {
+            assert!(temp_paths.contains(input_path));
+
+            let degree = output_prefix.iter().count();
+            assert!(degree <= 1);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn parses_nested_dir_flattened_correctly() -> Result<()> {
+        let ([input_dir, _output_dir], temp_paths) = setup_nested_dir(None)?;
+        let input_path = input_dir.path();
+
+        let args = RawSource {
+            input_dir: Some(input_path.to_path_buf()),
+            files: None,
+        };
+
+        let ingest = args.ingest(false).unwrap();
+        assert_eq!(ingest.len(), 10);
+
+        for IngestItem {
+            ref input_path,
+            ref output_prefix,
+        } in ingest.iter()
+        {
+            assert!(temp_paths.contains(input_path));
+
+            let degree = output_prefix.iter().count();
+            assert_eq!(degree, 0);
+        }
+
+        Ok(())
     }
 }
