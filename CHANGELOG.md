@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6](https://github.com/cartercanedy/rawbit/compare/v0.1.5...v0.1.6) - 2024-12-05
+
+### Fixed
+- *(cli)* filter unsupported files during ingest calculation ([#22](https://github.com/cartercanedy/rawbit/pull/22)) (by @cartercanedy)
+
+### Miscellaneous
+- *(CI)* lock down CI & repo ([#19](https://github.com/cartercanedy/rawbit/pull/19)) (by @cartercanedy)
+- *(dependencies)* Bump clap from 4.5.21 to 4.5.22 ([#16](https://github.com/cartercanedy/rawbit/pull/16)) (by @dependabot[bot])
+- *(dependencies)* Bump tokio from 1.41.1 to 1.42.0 ([#17](https://github.com/cartercanedy/rawbit/pull/17)) (by @dependabot[bot])
+- *(CI)* enable dependabot (by @cartercanedy)
+
+### Contributors
+
+* @cartercanedy
+* @dependabot[bot]
+
 ## [0.1.5](https://github.com/cartercanedy/rawbit/compare/v0.1.4...v0.1.5) - 2024-12-05
 
 ### Added
