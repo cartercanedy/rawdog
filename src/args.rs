@@ -1,6 +1,6 @@
 use std::{
     fs::read_dir,
-    path::{Path, PathBuf},
+    path::{Path, PathBuf}, thread::available_parallelism,
 };
 
 use clap::{
@@ -16,10 +16,6 @@ use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterat
 use smlog::{debug, warn};
 
 use crate::{map_err, AppError, RawbitResult};
-
-fn n_threads() -> usize {
-    std::thread::available_parallelism().unwrap().get()
-}
 
 macro_rules! style {
     ($style:expr) => {
@@ -78,8 +74,11 @@ pub struct ImportConfig {
     pub artist: Option<String>,
 
     #[arg(
+        short,
         long = "embed-original",
+        action = ArgAction::Set, 
         default_value_t = false,
+        num_args = 0..=1,
         help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
     )]
     pub embed: bool,
@@ -87,30 +86,65 @@ pub struct ImportConfig {
     #[arg(
         short,
         long,
+        action = ArgAction::Set, 
         default_value_t = false,
+        num_args = 0..=1,
         help = "overwrite existing files, if they exist"
     )]
     pub force: bool,
 
     #[arg(
-        short = 'j',
+        short,
         long,
-        value_name = "N",
-        default_value_t = n_threads(),
-        help = "number of threads to use while processing input images, defaults to number of CPUs"
+        action = ArgAction::Set, 
+        default_value_t = false,
+        num_args = 0..=1,
+        help = "ingest images from subdirectories as well, preserving directory structure in the output"
     )]
-    pub n_threads: usize,
+    pub recurse: bool,
 
     #[arg(
         short,
         long,
-        default_value_t = false,
-        action = ArgAction::SetTrue
+        action = ArgAction::Set, 
+        default_value_t = true,
+        num_args = 0..=1,
+        help = "Embed image preview in output DNG"
     )]
-    pub recurse: bool,
+    pub preview: bool,
+
+    #[arg(
+        short,
+        long,
+        action = ArgAction::Set, 
+        default_value_t = true,
+        num_args = 0..=1,
+        help = "Embed image thumbnail in output DNG"
+    )]
+    pub thumbnail: bool,
+
+    #[arg(
+        short = 'j',
+        long,
+        action = ArgAction::Set,
+        default_missing_value = "",
+        num_args = 0..=1,
+        value_name = "N",
+        help = "number of threads to use while processing input images, defaults to number of CPUs"
+    )]
+    pub n_threads: Option<usize>,
 
     #[command(flatten)]
     pub log_config: LogConfig,
+}
+
+impl ImportConfig {
+    pub fn n_threads(&self) -> usize {
+        let default_threads = available_parallelism().unwrap().get();
+        self.n_threads
+            .clone()
+            .unwrap_or(default_threads)
+    }
 }
 
 #[derive(Args)]
@@ -126,10 +160,11 @@ pub struct LogConfig {
 
     #[arg(
         short,
+        long,
         action = ArgAction::Count,
         help = "increase log verbosity; specify multiple times to increase verbosity"
     )]
-    pub verbose_logs: u8,
+    pub verbose: u8,
 }
 
 #[derive(Args)]
