@@ -22,7 +22,10 @@ use clap::Parser as _;
 use futures::future::join_all;
 use parse::FilenameFormat;
 use rawler::dng::{convert::ConvertParams, CropMode, DngCompression};
-use rayon::{iter::{IntoParallelRefIterator as _, ParallelIterator as _}, ThreadPoolBuilder};
+use rayon::{
+    iter::{IntoParallelRefIterator as _, ParallelIterator as _},
+    ThreadPoolBuilder,
+};
 use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 use tokio::{fs, runtime::Builder};
 

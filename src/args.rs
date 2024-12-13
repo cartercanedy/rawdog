@@ -1,6 +1,7 @@
 use std::{
     fs::read_dir,
-    path::{Path, PathBuf}, thread::available_parallelism,
+    path::{Path, PathBuf},
+    thread::available_parallelism,
 };
 
 use clap::{
@@ -33,6 +34,7 @@ const fn cli_style() -> Styles {
         .placeholder(style!(AnsiColor::Cyan))
 }
 
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Parser)]
 #[command(
     version,
@@ -76,7 +78,7 @@ pub struct ImportConfig {
     #[arg(
         short,
         long = "embed-original",
-        action = ArgAction::Set, 
+        action = ArgAction::Set,
         default_value_t = false,
         num_args = 0..=1,
         help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
@@ -86,7 +88,7 @@ pub struct ImportConfig {
     #[arg(
         short,
         long,
-        action = ArgAction::Set, 
+        action = ArgAction::Set,
         default_value_t = false,
         num_args = 0..=1,
         help = "overwrite existing files, if they exist"
@@ -96,7 +98,7 @@ pub struct ImportConfig {
     #[arg(
         short,
         long,
-        action = ArgAction::Set, 
+        action = ArgAction::Set,
         default_value_t = false,
         num_args = 0..=1,
         help = "ingest images from subdirectories as well, preserving directory structure in the output"
@@ -106,7 +108,7 @@ pub struct ImportConfig {
     #[arg(
         short,
         long,
-        action = ArgAction::Set, 
+        action = ArgAction::Set,
         default_value_t = true,
         num_args = 0..=1,
         help = "Embed image preview in output DNG"
@@ -116,7 +118,7 @@ pub struct ImportConfig {
     #[arg(
         short,
         long,
-        action = ArgAction::Set, 
+        action = ArgAction::Set,
         default_value_t = true,
         num_args = 0..=1,
         help = "Embed image thumbnail in output DNG"
@@ -141,9 +143,7 @@ pub struct ImportConfig {
 impl ImportConfig {
     pub fn n_threads(&self) -> usize {
         let default_threads = available_parallelism().unwrap().get();
-        self.n_threads
-            .clone()
-            .unwrap_or(default_threads)
+        self.n_threads.unwrap_or(default_threads)
     }
 }
 
