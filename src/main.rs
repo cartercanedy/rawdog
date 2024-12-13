@@ -22,7 +22,10 @@ use clap::Parser as _;
 use futures::future::join_all;
 use parse::FilenameFormat;
 use rawler::dng::{convert::ConvertParams, CropMode, DngCompression};
-use rayon::iter::{IntoParallelRefIterator as _, ParallelIterator as _};
+use rayon::{
+    iter::{IntoParallelRefIterator as _, ParallelIterator as _},
+    ThreadPoolBuilder,
+};
 use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 use tokio::{fs, runtime::Builder};
 
@@ -65,7 +68,7 @@ fn main() -> Result<(), u32> {
     let args = ImportConfig::parse();
     let LogConfig {
         quiet,
-        verbose_logs,
+        verbose: verbose_logs,
     } = args.log_config;
 
     let filter: LevelFilter = if quiet {
@@ -85,19 +88,23 @@ fn main() -> Result<(), u32> {
 
     Log::init(filter);
 
+    ThreadPoolBuilder::new()
+        .num_threads(args.n_threads())
+        .thread_name(|n| format!("rawbit-rayon-worker-{n}"))
+        .build_global()
+        .unwrap();
+
     let rt = Builder::new_multi_thread()
         .enable_all()
-        .thread_name("rawbit-worker")
-        .worker_threads(args.n_threads)
+        .thread_name("rawbit-tokio-worker")
+        .worker_threads(args.n_threads())
         .thread_stack_size(3 * 1024 * 1024)
         .build()
         .unwrap();
 
     let _rt_guard = rt.enter();
 
-    let result = run(args);
-
-    match rt.block_on(result) {
+    match rt.block_on(run(args)) {
         Err(err) => {
             use AppError::*;
 
@@ -122,6 +129,8 @@ fn main() -> Result<(), u32> {
 }
 
 async fn run(args: ImportConfig) -> RawbitResult<()> {
+    let n_threads = args.n_threads();
+
     let ImportConfig {
         source,
         output_dir,
@@ -168,7 +177,7 @@ async fn run(args: ImportConfig) -> RawbitResult<()> {
         ..Default::default()
     };
 
-    for chunk in ingest.chunks(args.n_threads) {
+    for chunk in ingest.chunks(n_threads) {
         let jobs = chunk
             .par_iter()
             .cloned()
