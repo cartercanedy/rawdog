@@ -1,0 +1,8 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap-markdown = "0.1.4"
+rawbit = { version = "0.1.7", path = "../rawbit" }

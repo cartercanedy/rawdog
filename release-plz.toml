@@ -1,6 +1,24 @@
-[changelog]
-body = """
+[workspace]
+changelog_update = false
 
+[[package]]
+name = "xtask"
+publish = false
+release = false
+git_release_enable = false
+
+[[package]]
+name = "rawbit"
+publish = true
+git_release_enable = true
+changelog_path = "CHANGELOG.md"
+changelog_update = true
+
+[changelog]
+header = """# Changelog
+
+"""
+body = """
 ## [{{ version | trim_start_matches(pat="v") }}]\
     {%- if release_link -%}\
         ({{ release_link }})\
@@ -27,7 +45,7 @@ body = """
 {%- endfor %}
 {% endif -%}
 {%- macro username(commit) -%}
-    {% if commit.remote.username %} (by @{{ commit.remote.username }}){% endif -%}
+    {% if commit.remote.username and "dependabot" not in commit.remote.username %} (by @{{ commit.remote.username }}){% endif -%}
 {% endmacro -%}
 {%- macro pr(commit) -%}
     {% if commit.remote.pr_number %} - #{{ commit.remote.pr_number }}{% endif -%}

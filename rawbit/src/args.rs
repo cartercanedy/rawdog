@@ -16,7 +16,7 @@ use rawler::decoders::supported_extensions;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use smlog::{debug, warn};
 
-use crate::{map_err, AppError, RawbitResult};
+use crate::common::{map_err, AppError, RawbitResult};
 
 macro_rules! style {
     ($style:expr) => {

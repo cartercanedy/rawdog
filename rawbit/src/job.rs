@@ -13,7 +13,7 @@ use rawler::{
 
 use smlog::info;
 
-use crate::{map_err, parse::FilenameFormat};
+use crate::{common::map_err, parse::FilenameFormat};
 
 #[derive(Debug)]
 pub enum Error {

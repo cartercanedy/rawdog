@@ -11,12 +11,7 @@
 )]
 #![allow(clippy::enum_glob_use, clippy::multiple_crate_versions)]
 
-use std::{
-    error::Error,
-    fmt::{self, Display},
-    io,
-    path::PathBuf,
-};
+use std::fmt::Display;
 
 use clap::Parser as _;
 use futures::future::join_all;
@@ -32,37 +27,11 @@ use tokio::{fs, runtime::Builder};
 mod args;
 mod job;
 mod parse;
+mod common;
 
+use common::{RawbitResult, AppError, map_err};
 use args::{ImportConfig, IngestItem, LogConfig};
 use job::Job;
-
-#[derive(Debug)]
-pub enum AppError {
-    FmtStrParse(parse::Error),
-    Io(String, io::Error),
-    DirNotFound(String, PathBuf),
-    AlreadyExists(String, PathBuf),
-    #[allow(unused)]
-    Other(String, Box<dyn Error + Send + Sync>),
-}
-
-impl Display for AppError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{self:?}")
-    }
-}
-
-impl Error for AppError {}
-
-macro_rules! map_err {
-    ($r:expr, $err_t:path, $($s:expr),+ $(,)?) => {
-        $r.map_err(|e| ($err_t)($($s.into()),+, e))
-    };
-}
-
-pub(crate) use map_err;
-
-type RawbitResult<T> = std::result::Result<T, AppError>;
 
 fn main() -> Result<(), u32> {
     let args = ImportConfig::parse();
