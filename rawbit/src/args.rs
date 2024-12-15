@@ -3,7 +3,6 @@ use std::{
     path::{Path, PathBuf},
     thread::available_parallelism,
 };
-
 use clap::{
     arg,
     builder::{
