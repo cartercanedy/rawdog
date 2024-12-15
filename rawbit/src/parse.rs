@@ -10,7 +10,7 @@ use rawler::decoders::RawMetadata;
 use smlog::warn;
 use zips::zip;
 
-use crate::{AppError, RawbitResult};
+use crate::common::{AppError, RawbitResult};
 
 const OPEN_EXPANSION: char = '{';
 const CLOSE_EXPANSION: char = '}';

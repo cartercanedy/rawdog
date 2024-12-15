@@ -1,0 +1,29 @@
+[package]
+name = "rawbit"
+authors = ["Carter J. Canedy <cartercanedy42@gmail.com>"]
+description = "A camera RAW image preprocessor and importer"
+categories = ["multimedia::encoding", "multimedia::images", "command-line-utilities"]
+keywords = ["imaging", "photography", "camera-RAW", "RAW"]
+license = "MIT"
+repository = "https://github.com/cartercanedy/rawbit"
+version = "0.1.7"
+edition = "2021"
+readme = "../README.md"
+
+[dependencies]
+chrono = { version = "0.4.39", default-features = false }
+clap = { version = "4.5.23", features = ["derive", "env", "string", "unicode"] }
+futures = "0.3.31"
+phf = { version = "0.11.2", features = ["macros"] }
+rawler = "0.6.0"
+rayon = "1.10.0"
+smlog = "0.1.4"
+tokio = { version = "1.42.0", features = ["macros", "rt-multi-thread", "windows-sys"] }
+zips = "0.1.7"
+
+[dev-dependencies]
+tempfile = "3.14.0"
+
+[[bin]]
+name = "rawbit"
+path = "src/main.rs"
