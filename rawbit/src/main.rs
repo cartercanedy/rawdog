@@ -25,12 +25,12 @@ use smlog::{debug, error, ignore, log::LevelFilter, warn, Log};
 use tokio::{fs, runtime::Builder};
 
 mod args;
+mod common;
 mod job;
 mod parse;
-mod common;
 
-use common::{RawbitResult, AppError, map_err};
 use args::{ImportConfig, IngestItem, LogConfig};
+use common::{map_err, AppError, RawbitResult};
 use job::Job;
 
 fn main() -> Result<(), u32> {

@@ -8,6 +8,7 @@ license = "MIT"
 repository = "https://github.com/cartercanedy/rawbit"
 version = "0.1.6"
 edition = "2021"
+readme = "/README.md"
 
 [dependencies]
 chrono = { version = "0.4.39", default-features = false }
@@ -26,7 +27,3 @@ tempfile = "3.14.0"
 [[bin]]
 name = "rawbit"
 path = "src/main.rs"
-
-[lib]
-name = "rawbit"
-path = "src/lib.rs"

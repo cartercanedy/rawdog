@@ -1,5 +1,10 @@
-use std::{path::PathBuf, error::Error, io, fmt::{self, Display}};
 use crate::parse;
+use std::{
+    error::Error,
+    fmt::{self, Display},
+    io,
+    path::PathBuf,
+};
 
 #[derive(Debug)]
 pub enum AppError {
@@ -27,5 +32,4 @@ macro_rules! map_err {
 
 pub(crate) use map_err;
 
-pub(crate) type RawbitResult<T> = std::result::Result<T, AppError>;
-
+pub type RawbitResult<T> = std::result::Result<T, AppError>;

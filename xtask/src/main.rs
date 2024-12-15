@@ -1,5 +1,5 @@
 use gen_cli_docs::gen_docs;
-use rawbit::clap::{self, command, Subcommand, Parser};
+use rawbit::clap::{self, command, Parser, Subcommand};
 
 mod gen_cli_docs;
 
@@ -8,12 +8,12 @@ mod gen_cli_docs;
 #[command(about = "Execute maintenance tasks for the `rawbit` project.", long_about = None)]
 struct TaskArgs {
     #[command(subcommand)]
-    pub command: Command
+    pub command: Command,
 }
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    GenCliDocs
+    GenCliDocs,
 }
 
 fn main() {
@@ -24,4 +24,3 @@ fn main() {
         }
     }
 }
-
