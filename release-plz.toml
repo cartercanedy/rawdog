@@ -57,6 +57,6 @@ commit_parsers = [
   { message = "^security", group = "security" },
   { message = "^chore", group = "miscellaneous"},
   { message = "^docs", group = "documentation"},
-  { message = "^.*\\(ignore\\)", skip = true },
+  { message = "^.*\\(.*ignore.*\\)", skip = true },
   { message = "^.*", group = "other" },
 ]
