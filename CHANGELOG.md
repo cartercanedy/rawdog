@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.8](https://github.com/cartercanedy/rawbit/compare/v0.1.7...v0.1.8) - 2024-12-16
+
+### Miscellaneous
+- *(CI)* include cross-compilation targets in CI && publish multi-platform binaries on release (#28) (by @cartercanedy)
+
+### Contributors
+
+* @cartercanedy
 ## [0.1.6](https://github.com/cartercanedy/rawbit/compare/v0.1.5...v0.1.6) - 2024-12-13
 
 ### Fixed
