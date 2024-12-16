@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.9](https://github.com/cartercanedy/rawbit/compare/v0.1.8...v0.1.9) - 2024-12-16
+
+### Fixed
+- *(CI)* use PAT for release workflows (by @cartercanedy)
+
+### Contributors
+
+* @cartercanedy
 ## [0.1.8](https://github.com/cartercanedy/rawbit/compare/v0.1.7...v0.1.8) - 2024-12-16
 
 ### Miscellaneous
