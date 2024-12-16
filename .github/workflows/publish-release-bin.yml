@@ -23,7 +23,7 @@ defaults:
 jobs:
   upload-assets:
     name: ${{ matrix.target }}
-    if: github.repository_owner == 'cartercanedy' && startsWith(github.event.release.name, 'rawbit')
+    if: github.repository_owner == 'cartercanedy'
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
