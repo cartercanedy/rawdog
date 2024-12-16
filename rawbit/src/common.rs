@@ -1,10 +1,11 @@
-use crate::parse;
 use std::{
     error::Error,
     fmt::{self, Display},
     io,
     path::PathBuf,
 };
+
+use crate::parse;
 
 #[derive(Debug)]
 pub enum AppError {
