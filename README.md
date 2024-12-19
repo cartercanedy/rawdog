@@ -1,5 +1,5 @@
 <div align="center">
-<img width="300" height="300" src="./res/rawbit.png"/>
+<img width="640" height="320" src="https://raw.githubuser.com/cartercanedy/rawbit/refs/heads/master/res/rawbit.png"/>
 <br>
 
 # rawbit
@@ -24,6 +24,9 @@ while offering the ability to manipulate metadata and customize file name format
 *__all written in Rust, btw...__*
 
 ## Installation
+
+### Pre-built binaries
+Pre-built binaries releases are available for download from the latest [GitHub release](https://github.com/cartercanedy/rawbit/releases/latest).
 
 I plan on making binary releases available for all major platforms via package managers.
 In the meantime, there are [AUR](https://aur.archlinux.org) & [crates.io](https://crates.io) packages available:
@@ -68,41 +71,52 @@ rawbit -i"./raw" -o"./dng" -F"%Y-%m-%d_{camera.model}_{lens.model}_{image.origin
 
 ## Usage
 
-<div>
-<pre>
-<span style="color:teal;">rawbit</span> <span style="color:teal;">[OPTIONS]</span> <span style="color:teal;">--out-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span> <span style="color:teal;">&lt;--in-dir &lt;DIR&gt;|FILES&gt;</span>
-<br>
+<style type="text/css">
+.cli-doc-content { white-space: pre; word-wrap: break-word; }
+.ansi33 { color: #aa5500; }
+.ansi36 { color: #00aaaa; }
+.ansi37 { color: #F5F1DE; }
+</style>
 
-<span style="color:olive;">Arguments:</span>
-  <span style="color:teal;">\[FILES\]...</span>
-&nbsp;&nbsp;&nbsp;&nbsp;individual files to convert
+<body style="font-size: normal;" >
+<pre class="cli-doc-content">
+<span class="ansi37">Usage:</span> <span class="ansi36">rawbit</span> <span class="ansi36">[OPTIONS]</span> <span class="ansi36">--out-dir</span><span class="ansi36"> </span><span class="ansi36">&lt;DIR&gt;</span> <span class="ansi36">&lt;--in-dir &lt;DIR&gt;|FILES&gt;</span>
+<span class="ansi33">Arguments:</span>
+<span class="ansi36">[FILES]...</span>
+    individual files to convert
+<span class="ansi33">Options:</span>
+<span class="ansi36">-i</span>, <span class="ansi36">--in-dir</span><span class="ansi36"> </span><span class="ansi36">&lt;DIR&gt;</span>
+    directory containing raw files to convert
+<span class="ansi36">-o</span>, <span class="ansi36">--out-dir</span><span class="ansi36"> </span><span class="ansi36">&lt;DIR&gt;</span>
+    directory to write converted DNGs
+<span class="ansi36">-F</span>, <span class="ansi36">--format</span><span class="ansi36"> </span><span class="ansi36">&lt;FORMAT&gt;</span>
+    filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax
+<span class="ansi36">-a</span>, <span class="ansi36">--artist</span><span class="ansi36"> </span><span class="ansi36">&lt;ARTIST&gt;</span>
+    value of the "artist" field in converted DNGs
+<span class="ansi36">-e</span>, <span class="ansi36">--embed-original</span><span class="ansi36">[=</span><span class="ansi36">&lt;BOOL&gt;</span><span class="ansi36">]</span>
+    embed the original raw image in the converted DNG
+    NOTE: conversion may take considerably longer [default: false] [possible values: true, false]
+<span class="ansi36">-f</span>, <span class="ansi36">--force</span><span class="ansi36">[=</span><span class="ansi36">&lt;BOOL&gt;</span><span class="ansi36">]</span>
+    overwrite existing files, if they exist [default: false] [possible values: true, false]
+<span class="ansi36">-r</span>, <span class="ansi36">--recurse</span><span class="ansi36">[=</span><span class="ansi36">&lt;BOOL&gt;</span><span class="ansi36">]</span>
+    ingest images from subdirectories as well, preserving directory structure in the output [default: false] [possible values: true, false]
+<span class="ansi36">-p</span>, <span class="ansi36">--preview</span><span class="ansi36"> [</span><span class="ansi36">&lt;BOOL&gt;</span><span class="ansi36">]</span>
+    Embed image preview in output DNG [default: true] [possible values: true, false]
+<span class="ansi36">-t</span>, <span class="ansi36">--thumbnail</span><span class="ansi36"> [</span><span class="ansi36">&lt;BOOL&gt;</span><span class="ansi36">]</span>
+    Embed image thumbnail in output DNG [default: true] [possible values: true, false]
+<span class="ansi36">-j</span>, <span class="ansi36">--n-threads</span><span class="ansi36"> [</span><span class="ansi36">&lt;N&gt;</span><span class="ansi36">]</span>
+    number of threads to use while processing input images, defaults to number of CPUs
+<span class="ansi36">-q</span>, <span class="ansi36">--quiet</span>
+    quiet output, only emit critical errors
+<span class="ansi36">-v</span>, <span class="ansi36">--verbose</span><span class="ansi36">...</span>
+    increase log verbosity; specify multiple times to increase verbosity
+<span class="ansi36">-h</span>, <span class="ansi36">--help</span>
+    Print help
+<span class="ansi36">-V</span>, <span class="ansi36">--version</span>
+    Print version
 
-<span style="color:olive;">Options:</span>
-  <span style="color:teal;">-i</span>, <span style="color:teal;">--in-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;directory containing raw files to convert
-  <span style="color:teal;">-o</span>, <span style="color:teal;">--out-dir</span><span style="color:teal;"> </span><span style="color:teal;">&lt;DIR&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;directory to write converted DNGs
-  <span style="color:teal;">-F</span>, <span style="color:teal;">--format</span><span style="color:teal;"> </span><span style="color:teal;">&lt;FORMAT&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;filename format of converted DNGs; see https://docs.rs/rawbit for info on syntax
-  <span style="color:teal;">-a</span>, <span style="color:teal;">--artist</span><span style="color:teal;"> </span><span style="color:teal;">&lt;ARTIST&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;value of the &quot;artist&quot; field in converted DNGs
-      <span style="color:teal;">--embed-original</span>
-&nbsp;&nbsp;&nbsp;&nbsp;embed the original raw image in the converted DNG
-&nbsp;&nbsp;&nbsp;&nbsp;NOTE: conversion may take considerably longer
-  <span style="color:teal;">-j</span>, <span style="color:teal;">--n-threads</span><span style="color:teal;"> </span><span style="color:teal;">&lt;N&gt;</span>
-&nbsp;&nbsp;&nbsp;&nbsp;number of threads to use while processing input images, defaults to number of CPUs
-  <span style="color:teal;">-q</span>, <span style="color:teal;">--quiet</span>
-&nbsp;&nbsp;&nbsp;&nbsp;quiet output, only emit critical errors
-  <span style="color:teal;">-v</span><span style="color:teal;">...</span>
-&nbsp;&nbsp;&nbsp;&nbsp;increase log verbosity; specify multiple times to increase verbosity
-  <span style="color:teal;">-f</span>, <span style="color:teal;">--force</span>
-&nbsp;&nbsp;&nbsp;&nbsp;overwrite existing files, if they exist
-  <span style="color:teal;">-h</span>, <span style="color:teal;">--help</span>
-&nbsp;&nbsp;&nbsp;&nbsp;Print help
-  <span style="color:teal;">-V</span>, <span style="color:teal;">--version</span>
-&nbsp;&nbsp;&nbsp;&nbsp;Print version
 </pre>
-</div>
+</body>
 
 ## Filename formatting
 

@@ -12,9 +12,10 @@ use clap::{
     },
     command, value_parser, ArgAction, Args, Parser,
 };
-use rawler::decoders::supported_extensions;
 use rayon::iter::{IntoParallelIterator as _, ParallelBridge as _, ParallelIterator as _};
 use smlog::{debug, warn};
+
+use rawler::decoders::supported_extensions;
 
 use crate::common::{map_err, AppError, RawbitResult};
 
@@ -35,7 +36,7 @@ const fn cli_style() -> Styles {
 }
 
 #[allow(clippy::struct_excessive_bools)]
-#[derive(Parser)]
+#[derive(Debug, Parser)]
 #[command(
     version,
     about = "A camera RAW image preprocessor and importer",
@@ -80,6 +81,9 @@ pub struct ImportConfig {
         long = "embed-original",
         action = ArgAction::Set,
         default_value_t = false,
+        default_missing_value = "true",
+        require_equals = true,
+        value_name = "BOOL",
         num_args = 0..=1,
         help = "embed the original raw image in the converted DNG\nNOTE: conversion may take considerably longer"
     )]
@@ -90,6 +94,9 @@ pub struct ImportConfig {
         long,
         action = ArgAction::Set,
         default_value_t = false,
+        default_missing_value = "true",
+        require_equals = true,
+        value_name = "BOOL",
         num_args = 0..=1,
         help = "overwrite existing files, if they exist"
     )]
@@ -100,6 +107,9 @@ pub struct ImportConfig {
         long,
         action = ArgAction::Set,
         default_value_t = false,
+        default_missing_value = "true",
+        require_equals = true,
+        value_name = "BOOL",
         num_args = 0..=1,
         help = "ingest images from subdirectories as well, preserving directory structure in the output"
     )]
@@ -110,6 +120,7 @@ pub struct ImportConfig {
         long,
         action = ArgAction::Set,
         default_value_t = true,
+        value_name = "BOOL",
         num_args = 0..=1,
         help = "Embed image preview in output DNG"
     )]
@@ -120,6 +131,7 @@ pub struct ImportConfig {
         long,
         action = ArgAction::Set,
         default_value_t = true,
+        value_name = "BOOL",
         num_args = 0..=1,
         help = "Embed image thumbnail in output DNG"
     )]
@@ -147,7 +159,7 @@ impl ImportConfig {
     }
 }
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 #[group(multiple = false)]
 pub struct LogConfig {
     #[arg(
@@ -167,7 +179,7 @@ pub struct LogConfig {
     pub verbose: u8,
 }
 
-#[derive(Args)]
+#[derive(Debug, Args)]
 #[group(required = true, multiple = false)]
 pub struct RawSource {
     #[arg(
