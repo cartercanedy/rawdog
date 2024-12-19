@@ -1,5 +1,5 @@
 <div align="center">
-<img width="640" height="320" src="https://raw.githubuser.com/cartercanedy/rawbit/refs/heads/master/res/rawbit.png"/>
+<img width="640" height="320" src="https://raw.githubusercontent.com/cartercanedy/rawbit/refs/heads/master/res/rawbit.png"/>
 <br>
 
 # rawbit
